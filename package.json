@@ -1,0 +1,68 @@
+{
+  "name": "chowbea-axios",
+  "version": "1.0.0",
+  "description": "Type-safe axios client that makes api requests a breeze",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "chowbea-axios": "./bin/run.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "oclif.manifest.json"
+  ],
+  "scripts": {
+    "build": "tsc && npm run manifest",
+    "manifest": "oclif manifest",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist oclif.manifest.json",
+    "prepublishOnly": "npm run build",
+    "test": "test"
+  },
+  "oclif": {
+    "bin": "chowbea-axios",
+    "dirname": "chowbea-axios",
+    "commands": "./dist/commands",
+    "topicSeparator": " "
+  },
+  "dependencies": {
+    "@inquirer/prompts": "^7.0.0",
+    "@oclif/core": "^4.0.0",
+    "ora": "^8.0.0",
+    "toml": "^3.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "oclif": "^4.22.65",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "axios",
+    "api",
+    "typescript",
+    "openapi",
+    "codegen",
+    "cli"
+  ],
+  "homepage": "https://github.com/oddFEELING/chowbea-axios#readme",
+  "bugs": {
+    "url": "https://github.com/oddFEELING/chowbea-axios/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+ssh://git@github.com/oddFEELING/chowbea-axios.git"
+  },
+  "license": "MIT",
+  "author": "Emmanuel Alawode"
+}
