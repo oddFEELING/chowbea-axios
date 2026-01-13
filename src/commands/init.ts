@@ -26,31 +26,21 @@ import { generateClientFiles } from "../lib/generator.js";
 import { createLogger, getLogLevel, logSeparator } from "../lib/logger.js";
 
 /**
- * Default npm scripts to add to package.json
+ * Default npm scripts to add to package.json.
+ * Uses npx to run the CLI commands.
  */
 const DEFAULT_SCRIPTS: Record<string, string> = {
-	"api:generate": "node cli/chowbea-axios/bin/run.js generate",
-	"api:fetch": "node cli/chowbea-axios/bin/run.js fetch",
-	"api:watch": "node cli/chowbea-axios/bin/run.js watch",
-	"api:init": "node cli/chowbea-axios/bin/run.js init",
-	"api:status": "node cli/chowbea-axios/bin/run.js status",
-	"api:validate": "node cli/chowbea-axios/bin/run.js validate",
-	"api:diff": "node cli/chowbea-axios/bin/run.js diff",
-	"api:help": "node cli/chowbea-axios/bin/run.js --help",
+	"api:generate": "chowbea-axios generate",
+	"api:fetch": "chowbea-axios fetch",
+	"api:watch": "chowbea-axios watch",
+	"api:status": "chowbea-axios status",
+	"api:validate": "chowbea-axios validate",
+	"api:diff": "chowbea-axios diff",
 };
 
 /**
- * Default pnpm-workspace.yaml content
- */
-const DEFAULT_WORKSPACE_YAML = `# pnpm workspace configuration
-# Includes the CLI tools as workspace packages
-packages:
-  - "cli/*"
-`;
-
-/**
  * Initialize chowbea-axios in a project.
- * Creates config, workspace file, and npm scripts.
+ * Creates config and npm scripts.
  */
 export default class Init extends Command {
 	static override description =
@@ -58,10 +48,7 @@ export default class Init extends Command {
 
 Prompts for your API endpoint, then automatically:
 - Creates api.config.toml with your settings
-- Sets up pnpm workspace for the CLI
 - Adds npm scripts (api:fetch, api:generate, etc.)
-- Installs openapi-typescript dependency
-- Builds the CLI
 - Generates client files (api.instance.ts, api.client.ts, etc.)
 - Fetches spec and generates types (if not localhost)
 
@@ -90,10 +77,6 @@ Detects existing setup and asks before overwriting.`;
 		}),
 		"skip-scripts": Flags.boolean({
 			description: "Skip adding npm scripts to package.json",
-			default: false,
-		}),
-		"skip-workspace": Flags.boolean({
-			description: "Skip creating/updating pnpm-workspace.yaml",
 			default: false,
 		}),
 		"skip-client": Flags.boolean({
@@ -180,6 +163,9 @@ Detects existing setup and asks before overwriting.`;
 				timeout: flags.timeout,
 			};
 
+			// Detect package manager for install commands
+			const pm = await this.detectPackageManager(projectRoot);
+
 			// Step 1: Create api.config.toml
 			await this.setupConfig(
 				projectRoot,
@@ -189,55 +175,45 @@ Detects existing setup and asks before overwriting.`;
 				logger
 			);
 
-			// Step 2: Create/update pnpm-workspace.yaml
-			if (!flags["skip-workspace"]) {
-				await this.setupWorkspace(projectRoot, flags, logger);
-			}
+			// Step 2: Install axios dependency
+			await this.ensureAxios(projectRoot, pm, logger);
 
 			// Step 3: Add npm scripts to package.json
 			if (!flags["skip-scripts"]) {
 				await this.setupScripts(projectRoot, flags, logger);
 			}
 
-			// Step 3.5: Setup concurrent dev script (optional)
+			// Step 4: Setup concurrent dev script (optional)
 			if (!flags["skip-concurrent"]) {
 				await this.setupConcurrentlyScript(projectRoot, logger);
 			}
 
-			// Step 4: Check and install openapi-typescript
-			await this.ensureOpenApiTypescript(projectRoot, logger);
-
-			// Step 5: Run pnpm install
-			await this.runPnpmInstall(projectRoot, logger);
-
-			// Step 6: Build the CLI
-			await this.buildCli(projectRoot, logger);
-
-			// Step 7: Generate client files
+			// Step 5: Generate client files
 			if (!flags["skip-client"]) {
 				await this.setupClientFiles(projectRoot, instanceConfig, flags, logger);
 			}
 
-			// Step 8: Run initial fetch (if not localhost default)
+			// Step 6: Run initial fetch (if not localhost default)
 			const isLocalhost =
 				apiEndpoint.includes("localhost") || apiEndpoint.includes("127.0.0.1");
 			if (!isLocalhost) {
-				await this.runInitialFetch(projectRoot, logger);
+				await this.runInitialFetch(projectRoot, pm, logger);
 			}
 
 			// Summary
+			const runCmd = pm === "npm" ? "npm run" : pm;
 			logSeparator(logger, "Setup Complete");
 			logger.info("");
 			if (isLocalhost) {
 				logger.info("Setup complete! When your API server is running:");
-				logger.info("  pnpm api:fetch    # Fetch spec and generate types");
+				logger.info(`  ${runCmd} api:fetch    # Fetch spec and generate types`);
 			} else {
 				logger.info("Setup complete! Your API client is ready to use.");
 				logger.info("");
 				logger.info("Useful commands:");
-				logger.info("  pnpm api:status   # Check current status");
-				logger.info("  pnpm api:fetch    # Re-fetch spec and regenerate");
-				logger.info("  pnpm api:watch    # Watch for spec changes");
+				logger.info(`  ${runCmd} api:status   # Check current status`);
+				logger.info(`  ${runCmd} api:fetch    # Re-fetch spec and regenerate`);
+				logger.info(`  ${runCmd} api:watch    # Watch for spec changes`);
 			}
 			logger.info("");
 		} catch (error) {
@@ -258,14 +234,6 @@ Detects existing setup and asks before overwriting.`;
 		const hasConfig = await configExists(configPath);
 		if (hasConfig) {
 			found.push("api.config.toml");
-		}
-
-		// Check for workspace
-		try {
-			await access(path.join(projectRoot, "pnpm-workspace.yaml"));
-			found.push("pnpm-workspace.yaml");
-		} catch {
-			// Not found
 		}
 
 		// Only check for client files if config exists (to avoid auto-creating config)
@@ -296,103 +264,80 @@ Detects existing setup and asks before overwriting.`;
 	}
 
 	/**
-	 * Ensures openapi-typescript is installed as a dev dependency.
-	 */
-	private async ensureOpenApiTypescript(
-		projectRoot: string,
-		logger: ReturnType<typeof createLogger>
-	): Promise<void> {
-		logger.info("Checking for openapi-typescript...");
-
-		// Check if already installed
-		const packageJsonPath = path.join(projectRoot, "package.json");
-		const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
-		const deps = packageJson.dependencies || {};
-		const devDeps = packageJson.devDependencies || {};
-
-		if (deps["openapi-typescript"] || devDeps["openapi-typescript"]) {
-			logger.info("openapi-typescript already installed");
-			return;
-		}
-
-		// Install it
-		logger.info("Installing openapi-typescript...");
-		const result = spawnSync("pnpm", ["add", "-D", "openapi-typescript"], {
-			cwd: projectRoot,
-			stdio: "inherit",
-		});
-
-		if (result.status !== 0) {
-			throw new Error("Failed to install openapi-typescript");
-		}
-
-		logger.info("openapi-typescript installed");
-	}
-
-	/**
-	 * Runs pnpm install to link workspaces.
-	 */
-	private async runPnpmInstall(
-		projectRoot: string,
-		logger: ReturnType<typeof createLogger>
-	): Promise<void> {
-		logger.info("Running pnpm install...");
-
-		const result = spawnSync("pnpm", ["install"], {
-			cwd: projectRoot,
-			stdio: "inherit",
-		});
-
-		if (result.status !== 0) {
-			throw new Error("pnpm install failed");
-		}
-
-		logger.info("Dependencies installed");
-	}
-
-	/**
-	 * Builds the CLI.
-	 */
-	private async buildCli(
-		projectRoot: string,
-		logger: ReturnType<typeof createLogger>
-	): Promise<void> {
-		logger.info("Building CLI...");
-
-		const result = spawnSync("pnpm", ["--filter", "chowbea-axios", "build"], {
-			cwd: projectRoot,
-			stdio: "inherit",
-		});
-
-		if (result.status !== 0) {
-			throw new Error("CLI build failed");
-		}
-
-		logger.info("CLI built successfully");
-	}
-
-	/**
 	 * Runs initial fetch to download spec and generate types.
 	 */
 	private async runInitialFetch(
 		projectRoot: string,
+		pm: "pnpm" | "yarn" | "bun" | "npm",
 		logger: ReturnType<typeof createLogger>
 	): Promise<void> {
 		logger.info("Fetching OpenAPI spec and generating types...");
 
-		const result = spawnSync(
-			"node",
-			["cli/chowbea-axios/bin/run.js", "fetch"],
-			{
-				cwd: projectRoot,
-				stdio: "inherit",
-			}
-		);
+		// Use npx/bunx to run the CLI command
+		const runner = pm === "bun" ? "bunx" : "npx";
+		const result = spawnSync(runner, ["chowbea-axios", "fetch"], {
+			cwd: projectRoot,
+			stdio: "inherit",
+		});
 
+		const runCmd = pm === "npm" ? "npm run" : pm;
 		if (result.status !== 0) {
-			logger.warn("Initial fetch failed - you can run 'pnpm api:fetch' later");
+			logger.warn(`Initial fetch failed - you can run '${runCmd} api:fetch' later`);
 		} else {
 			logger.info("Types generated successfully");
+		}
+	}
+
+	/**
+	 * Ensures axios is installed as a dependency.
+	 */
+	private async ensureAxios(
+		projectRoot: string,
+		pm: "pnpm" | "yarn" | "bun" | "npm",
+		logger: ReturnType<typeof createLogger>
+	): Promise<void> {
+		// Check if already installed
+		const packageJsonPath = path.join(projectRoot, "package.json");
+		const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8"));
+		const deps = packageJson.dependencies || {};
+
+		if (deps.axios) {
+			logger.info("axios already installed");
+			return;
+		}
+
+		logger.info("Installing axios...");
+
+		// Build install command based on package manager
+		let cmd: string;
+		let args: string[];
+		switch (pm) {
+			case "yarn":
+				cmd = "yarn";
+				args = ["add", "axios"];
+				break;
+			case "bun":
+				cmd = "bun";
+				args = ["add", "axios"];
+				break;
+			case "npm":
+				cmd = "npm";
+				args = ["install", "axios"];
+				break;
+			default:
+				cmd = "pnpm";
+				args = ["add", "axios"];
+		}
+
+		const result = spawnSync(cmd, args, {
+			cwd: projectRoot,
+			stdio: "inherit",
+		});
+
+		if (result.status !== 0) {
+			logger.warn("Failed to install axios - please install it manually");
+		} else {
+			logger.info("axios installed");
 		}
 	}
 
@@ -443,159 +388,23 @@ Detects existing setup and asks before overwriting.`;
 		instanceConfig: InstanceConfig,
 		apiEndpoint: string
 	): string {
-		return `# Chowbea Axios API Configuration
-# Run 'chowbea-axios init' to regenerate with prompts
+		return `# Chowbea Axios Configuration
 
-# Remote OpenAPI specification endpoint
 api_endpoint = "${apiEndpoint}"
-
-# Polling interval for watch mode (milliseconds)
 poll_interval_ms = 10000
 
 [output]
-# Folder where all generated files are written
-# Structure:
-#   _internal/     - cache files (openapi.json, .api-cache.json)
-#   _generated/    - generated code (api.types.ts, api.operations.ts)
-#   api.instance.ts - axios instance (generated once, editable)
-#   api.error.ts    - error handling (generated once, editable)
-#   api.client.ts   - typed API facade (generated once, editable)
 folder = "app/services/api"
 
 [instance]
-# Environment variable name for base URL
 base_url_env = "${instanceConfig.base_url_env}"
-
-# localStorage key for auth token
 token_key = "${instanceConfig.token_key}"
-
-# Include credentials (cookies) in requests
 with_credentials = ${instanceConfig.with_credentials}
-
-# Request timeout in milliseconds
 timeout = ${instanceConfig.timeout}
+
+[watch]
+debug = false
 `;
-	}
-
-	/**
-	 * Creates or updates pnpm-workspace.yaml to include cli/*.
-	 */
-	private async setupWorkspace(
-		projectRoot: string,
-		flags: { force: boolean },
-		logger: ReturnType<typeof createLogger>
-	): Promise<void> {
-		const workspacePath = path.join(projectRoot, "pnpm-workspace.yaml");
-
-		logger.info("Setting up pnpm-workspace.yaml...");
-
-		// Check if workspace file exists
-		let existingContent: string | null = null;
-		try {
-			await access(workspacePath);
-			existingContent = await readFile(workspacePath, "utf8");
-		} catch {
-			// File doesn't exist
-		}
-
-		// Check if cli/* is already included
-		if (existingContent && existingContent.includes("cli/*")) {
-			logger.info("pnpm-workspace.yaml already includes cli/*");
-			return;
-		}
-
-		if (existingContent) {
-			// File exists but doesn't have cli/*
-			if (!flags.force) {
-				const shouldModify = await confirm({
-					message:
-						"pnpm-workspace.yaml exists but doesn't include cli/*. Add it?",
-					default: true,
-				});
-
-				if (!shouldModify) {
-					logger.warn(
-						"Skipping workspace setup - you may need to add cli/* manually"
-					);
-					return;
-				}
-			}
-
-			// Append cli/* to existing packages
-			const updatedContent = this.addCliToWorkspace(existingContent);
-			await writeFile(workspacePath, updatedContent, "utf8");
-			logger.info("Updated pnpm-workspace.yaml to include cli/*");
-		} else {
-			// Create new workspace file
-			await writeFile(workspacePath, DEFAULT_WORKSPACE_YAML, "utf8");
-			logger.info({ path: workspacePath }, "Created pnpm-workspace.yaml");
-		}
-	}
-
-	/**
-	 * Adds cli/* to an existing pnpm-workspace.yaml content.
-	 * Handles various YAML formats including comments and different indentation.
-	 */
-	private addCliToWorkspace(content: string): string {
-		const lines = content.split("\n");
-		const result: string[] = [];
-		let packagesLineIndex = -1;
-		let firstPackageEntryIndex = -1;
-		let detectedIndent = "  "; // Default indentation
-
-		// First pass: find the packages section and first entry
-		for (let i = 0; i < lines.length; i++) {
-			const line = lines[i];
-			const trimmed = line.trim();
-
-			// Find packages: line (ignoring comments)
-			if (trimmed === "packages:" || trimmed.startsWith("packages:")) {
-				packagesLineIndex = i;
-			}
-
-			// Find first package entry after packages: line
-			if (
-				packagesLineIndex !== -1 &&
-				firstPackageEntryIndex === -1 &&
-				trimmed.startsWith("-") &&
-				!trimmed.startsWith("#")
-			) {
-				firstPackageEntryIndex = i;
-				// Detect indentation from first entry
-				const leadingSpaces = line.match(/^(\s*)/);
-				if (leadingSpaces && leadingSpaces[1]) {
-					detectedIndent = leadingSpaces[1];
-				}
-			}
-		}
-
-		// Build result with cli/* added in the right place
-		for (let i = 0; i < lines.length; i++) {
-			result.push(lines[i]);
-
-			// Add cli/* after the first package entry
-			if (i === firstPackageEntryIndex) {
-				result.push(`${detectedIndent}- "cli/*"`);
-			}
-		}
-
-		// If no packages section found, create one
-		if (packagesLineIndex === -1) {
-			result.push("");
-			result.push("packages:");
-			result.push('  - "cli/*"');
-		} else if (firstPackageEntryIndex === -1) {
-			// packages: exists but no entries - add cli/* right after it
-			const insertIndex = result.findIndex(
-				(line) =>
-					line.trim() === "packages:" || line.trim().startsWith("packages:")
-			);
-			if (insertIndex !== -1) {
-				result.splice(insertIndex + 1, 0, '  - "cli/*"');
-			}
-		}
-
-		return result.join("\n");
 	}
 
 	/**
