@@ -1,6 +1,14 @@
 # chowbea-axios
 
-CLI tool for generating TypeScript types and operations from OpenAPI specifications.
+CLI tool that turns an OpenAPI spec into a typed Axios client and helpers.
+
+## Full Picture (How it Works)
+
+- `init` creates `api.config.toml`, adds scripts, and generates base client files.
+- `fetch` (or `watch`) retrieves your spec into `_internal/openapi.json`.
+- Types and operations are generated into `_generated/`.
+- You import `api` from `api.client.ts` and call endpoints with full typing.
+- Editable files (`api.instance.ts`, `api.error.ts`, `api.client.ts`, `api.helpers.ts`) are generated once and kept.
 
 ## Features
 
@@ -14,103 +22,61 @@ CLI tool for generating TypeScript types and operations from OpenAPI specificati
 - **Local spec support**: Use local OpenAPI files instead of remote endpoints
 - **Auth headers**: Configure headers with env var interpolation for protected specs
 
-## Installation
+## Installation + Prerequisites
+
+- Node `>=18` (per `package.json`)
+- `init` installs `axios` into your project automatically
 
 ```bash
+# Global install
 npm install -g chowbea-axios
 ```
 
-Or use with npx:
+Or use without installing:
 
 ```bash
+# One-off usage
 npx chowbea-axios init
 ```
 
-## Quick Start
+## Quick Start (First Run)
 
 ```bash
-# Initialize in your project (creates config, generates client files)
+# 1) Initialize in your project (creates config + base client files)
 chowbea-axios init
 
-# Fetch spec and generate types
+# 2) Fetch spec and generate types + operations
 chowbea-axios fetch
 
-# Watch for changes during development
+# 3) (Optional) Watch for spec changes during development
 chowbea-axios watch
 ```
 
-## Commands
+Then use the client:
 
-### `chowbea-axios init`
+```typescript
+import { api } from "./app/services/api/api.client";
 
-Interactive setup - prompts for your API endpoint and generates everything.
+// Result-based call (never throws)
+const { data, error } = await api.get("/users/{id}", { id: "123" });
 
-```bash
-chowbea-axios init              # Interactive setup
-chowbea-axios init --force      # Overwrite existing config
+if (error) {
+  console.error(error.message);
+  return;
+}
+
+// Typed response data
+console.log(data.name);
 ```
 
-### `chowbea-axios fetch`
+## Configuration Reference
 
-Fetch OpenAPI spec and generate types.
-
-```bash
-chowbea-axios fetch             # Fetch from configured endpoint
-chowbea-axios fetch --force     # Regenerate even if unchanged
-chowbea-axios fetch --dry-run   # Preview without writing
-```
-
-### `chowbea-axios generate`
-
-Generate types from local spec file.
-
-```bash
-chowbea-axios generate                         # Generate from cached spec
-chowbea-axios generate --spec-file ./api.json  # Use specific file
-```
-
-### `chowbea-axios watch`
-
-Watch for spec changes and regenerate automatically.
-
-```bash
-chowbea-axios watch                 # Default 10s interval
-chowbea-axios watch --interval 5000 # Poll every 5 seconds
-chowbea-axios watch --debug         # Show verbose logs
-```
-
-### `chowbea-axios status`
-
-Display current status of config, cache, and generated files.
-
-```bash
-chowbea-axios status
-```
-
-### `chowbea-axios validate`
-
-Validate OpenAPI spec structure.
-
-```bash
-chowbea-axios validate
-chowbea-axios validate --strict
-```
-
-### `chowbea-axios diff`
-
-Compare current vs new spec.
-
-```bash
-chowbea-axios diff
-```
-
-## Configuration
-
-Config file `api.config.toml` is created by `init`:
+`api.config.toml` is created by `init` and is the main source of truth:
 
 ```toml
 api_endpoint = "http://localhost:3000/docs/swagger/json"
 poll_interval_ms = 10000
+# spec_file = "./openapi.json"
 
 [output]
 folder = "app/services/api"
@@ -121,11 +87,25 @@ token_key = "auth-token"
 with_credentials = true
 timeout = 30000
 
+[fetch]
+# headers = { Authorization = "Bearer $API_TOKEN" }
+
 [watch]
 debug = false
 ```
 
-## Generated Files
+- `api_endpoint`: Remote OpenAPI endpoint used by `fetch` and `watch`.
+- `spec_file`: Optional local spec path; if set, it overrides `api_endpoint` for generation.
+- `poll_interval_ms`: Watch interval if `--interval` is not provided.
+- `[output].folder`: Where generated files go (relative to project root).
+- `[instance].base_url_env`: Name of the env var read at runtime in `api.instance.ts`.
+- `[instance].token_key`: localStorage key used by the axios instance.
+- `[instance].with_credentials`: Adds cookies/credentials to requests.
+- `[instance].timeout`: Axios request timeout (ms).
+- `[fetch].headers`: Extra headers for remote fetch; values can use `$ENV` or `${ENV}`.
+- `[watch].debug`: Enables verbose cycle logs.
+
+## Generated Files & Editability
 
 ```
 app/services/api/
@@ -133,29 +113,132 @@ app/services/api/
 │   ├── .api-cache.json      # Cache metadata
 │   └── openapi.json         # Cached spec
 ├── _generated/
-│   ├── api.operations.ts    # Generated operations
-│   └── api.types.ts         # Generated types
-├── api.instance.ts          # Axios instance (editable)
-├── api.error.ts             # Error types (editable)
-└── api.client.ts            # Typed API client (editable)
+│   ├── api.operations.ts    # Generated operations (overwritten)
+│   └── api.types.ts         # Generated types (overwritten)
+├── api.helpers.ts           # Helper types (editable, generated once)
+├── api.instance.ts          # Axios instance (editable, generated once)
+├── api.error.ts             # Error types (editable, generated once)
+└── api.client.ts            # Typed API client (editable, generated once)
 ```
 
-## Usage
+- `_internal` and `_generated` are always overwritten during generation.
+- The root files are generated once and safe to edit.
+
+## Client Usage & Error Handling
+
+All client calls return `{ data, error }` instead of throwing. This keeps error handling explicit and predictable.
 
 ```typescript
 import { api } from "./app/services/api/api.client";
 
-// Result-based - never throws
-const { data, error } = await api.get("/users/{id}", { id: "123" });
+// Result-based call
+const { data, error } = await api.post("/users", { name: "Ada" });
 
 if (error) {
   console.error(error.message);
   return;
 }
 
-// data is fully typed
-console.log(data.name);
+console.log(data.id);
 ```
+
+## Helpers (api.helpers.ts)
+
+Use helpers to extract request/response types and schema models when you want explicit type control in app code.
+
+**Base helpers**
+- `Paths`: Union of all OpenAPI path strings.
+- `HttpMethod`: `"get" | "post" | "put" | "delete" | "patch"`.
+- `Expand<T>`: Expands a single level of a type for better intellisense.
+- `ExpandRecursively<T>`: Expands nested types for full intellisense.
+
+**Path-based helpers**
+- `ApiRequestBody<P, M>`: Request body type for a path + method.
+- `ApiResponseData<P, M, Status?>`: Response body type for a path + method.
+- `ApiPathParams<P>`: Path params extracted from `{param}` segments.
+- `ApiQueryParams<P, M>`: Query params type for a path + method.
+- `ApiStatusCodes<P, M>`: Available status codes for a path + method.
+
+**Operation-based helpers**
+- `ServerRequestBody<OpId>`: Request body by `operationId`.
+- `ServerRequestParams<OpId>`: Path + query params by `operationId`.
+- `ServerResponseType<OpId, Status?>`: Response type by `operationId`.
+
+**Schema helpers**
+- `ServerModel<ModelName>`: Extract schema types from OpenAPI components.
+
+```typescript
+import type {
+  Paths,
+  HttpMethod,
+  Expand,
+  ExpandRecursively,
+  ApiRequestBody,
+  ApiResponseData,
+  ApiPathParams,
+  ApiQueryParams,
+  ApiStatusCodes,
+  ServerRequestBody,
+  ServerRequestParams,
+  ServerResponseType,
+  ServerModel,
+} from "./app/services/api/api.helpers";
+
+// Path-based helpers
+type CreateUserInput = ApiRequestBody<"/users", "post">;
+type UserResponse = ApiResponseData<"/users/{id}", "get">;
+type UserPath = ApiPathParams<"/users/{id}">;
+type UserQuery = ApiQueryParams<"/users", "get">;
+type UserStatus = ApiStatusCodes<"/users/{id}", "get">;
+
+// Operation-based helpers (uses operationId keys)
+type CreateUserInputByOp = ServerRequestBody<"createUser">;
+type UserParamsByOp = ServerRequestParams<"getUserById">;
+type UserResponseByOp = ServerResponseType<"getUserById">;
+
+// Schema helpers
+type UserModel = ServerModel<"User">;
+```
+
+## Path-Based vs Operation-Based Approaches
+
+**Path-based** is great for quick usage when you know the endpoint path:
+
+```typescript
+// Calls by path template
+const { data, error } = await api.get("/users/{id}", { id: "123" });
+```
+
+**Operation-based** uses OpenAPI `operationId` for semantic method names:
+
+```typescript
+// Calls by operationId (generated in api.operations.ts)
+const { data, error } = await api.op.getUserById({ id: "123" });
+```
+
+**When to choose which**
+- Path-based: fastest for exploration and when you don’t control `operationId`s.
+- Operation-based: cleaner call sites and more stable names when `operationId`s are consistent.
+
+## Command Reference
+
+| Command | Purpose | Key flags |
+| --- | --- | --- |
+| `chowbea-axios init` | Interactive setup. Prompts for API endpoint, output folder, and package manager. | `--force`, `--skip-scripts`, `--skip-client`, `--skip-concurrent` |
+| `chowbea-axios fetch` | Fetch remote spec and generate types/operations. | `-c, --config`, `-e, --endpoint`, `-s, --spec-file`, `-f, --force`, `-n, --dry-run`, `--types-only`, `--operations-only` |
+| `chowbea-axios generate` | Generate types/operations from the cached spec (or a local file). | `-c, --config`, `-s, --spec-file`, `-n, --dry-run`, `--types-only`, `--operations-only` |
+| `chowbea-axios watch` | Watch for spec changes and regenerate on a timer. | `-c, --config`, `-i, --interval`, `-d, --debug` |
+| `chowbea-axios status` | Show config + cache + generated file status. | `-c, --config` |
+| `chowbea-axios validate` | Validate the OpenAPI spec structure. | `-c, --config`, `-s, --spec`, `--strict` |
+| `chowbea-axios diff` | Compare cached spec with a new spec (remote or local). | `-c, --config`, `-s, --spec` |
+
+## Tips & Troubleshooting
+
+- Re-run `fetch` whenever your API spec changes.
+- Use `watch` during local dev to keep types up to date.
+- Delete `app/services/api/_internal` to reset cache if types seem stale.
+- If scripts are missing, re-run `init` (or add them manually).
+- If headers use `$ENV`/`${ENV}`, make sure those env vars are set.
 
 ## License
 
