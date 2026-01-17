@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="https://axios.chowbea.com/images/chowbea-axios.png" alt="chowbea-axios" width="400" />
+  <img src="https://axios.chowbea.com/images/chowbea-axios.png" alt="chowbea-axios" width="100%" />
 </p>
 
 <h1 align="center">Chowbea-axios</h1>

@@ -1,6 +1,6 @@
 {
   "name": "chowbea-axios",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "description": "Type-safe axios client that makes api requests a breeze",
   "type": "module",
   "main": "dist/index.js",
