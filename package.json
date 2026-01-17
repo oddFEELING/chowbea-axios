@@ -1,6 +1,6 @@
 {
   "name": "chowbea-axios",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Type-safe axios client that makes api requests a breeze",
   "type": "module",
   "main": "dist/index.js",
@@ -55,7 +55,7 @@
     "codegen",
     "cli"
   ],
-  "homepage": "https://github.com/oddFEELING/chowbea-axios#readme",
+  "homepage": "https://axios.chowbea.com",
   "bugs": {
     "url": "https://github.com/oddFEELING/chowbea-axios/issues"
   },
