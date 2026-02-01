@@ -807,18 +807,18 @@ export type ServerRequestBody<OpId extends keyof operations> = ExpandRecursively
 export type ServerRequestParams<OpId extends keyof operations> = ExpandRecursively<
 	operations[OpId] extends { parameters: infer P }
 		? P extends { path?: infer Path; query?: infer Query }
-			? (Path extends Record<string, unknown> ? { path: Path } : Record<string, never>) &
-					(Query extends Record<string, unknown> ? { query?: Query } : Record<string, never>)
+			? (Path extends Record<string, unknown> ? { path: Path } : {}) &
+					(Query extends Record<string, unknown> ? { query?: Query } : {})
 			: P extends { path?: infer Path }
 				? Path extends Record<string, unknown>
 					? { path: Path }
-					: never
+					: {}
 				: P extends { query?: infer Query }
 					? Query extends Record<string, unknown>
 						? { query?: Query }
-						: never
-					: never
-		: never
+						: {}
+					: {}
+		: {}
 >;
 
 /**
