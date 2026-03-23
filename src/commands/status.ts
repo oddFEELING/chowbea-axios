@@ -5,6 +5,7 @@
 
 import { access, stat } from "node:fs/promises";
 import path from "node:path";
+import pc from "picocolors";
 import { Command, Flags } from "@oclif/core";
 
 import { getOutputPaths, loadConfig } from "../lib/config.js";
@@ -215,88 +216,83 @@ Displays:
 		fileStatus: Record<string, { exists: boolean; modifiedAgo?: string }>;
 		projectRoot: string;
 	}): void {
-		const line = "─".repeat(50);
+		const INDENT = "              "; // 14 spaces to align under message
+		const LABEL_WIDTH = 10;
+		const pad = (label: string) => label.padEnd(LABEL_WIDTH);
+
+		const yes = pc.green("yes");
+		const no = pc.red("no");
+		const missing = pc.red("missing");
 
 		console.log();
-		console.log(`╭${line}`);
-		console.log("│ Status");
-		console.log(`├${line}`);
+		console.log(`  ${pc.bold("chowbea-axios status")}`);
+		console.log();
 
 		// Config section
-		console.log("│");
-		console.log(
-			`│ Config: ${info.configPath}${info.wasCreated ? " (created)" : ""}`
-		);
-		console.log(`│   endpoint: ${info.endpoint}`);
-		console.log(`│   output: ${info.outputFolder}`);
+		console.log(`  ${pc.cyan("\u25cf")} ${pc.bold(pc.cyan(pad("config")))}${info.configPath}${info.wasCreated ? pc.yellow(" (created)") : ""}`);
+		console.log(`${INDENT}${pc.dim("endpoint:")} ${pc.cyan(info.endpoint)}`);
+		console.log(`${INDENT}${pc.dim("output:")} ${pc.cyan(info.outputFolder)}`);
+		console.log();
 
 		// Spec section
-		console.log("│");
-		console.log("│ Spec:");
 		if (info.specExists && info.cacheMetadata) {
 			const cachedAgo = this.formatTimeAgo(
 				new Date(info.cacheMetadata.timestamp)
 			);
-			console.log(
-				`│   cached: yes (hash: ${info.cacheMetadata.hash.slice(0, 8)}, ${cachedAgo})`
-			);
+			console.log(`  ${pc.cyan("\u25cf")} ${pc.bold(pc.cyan(pad("spec")))}${pc.dim("cached:")} ${yes} ${pc.dim(`(hash: ${info.cacheMetadata.hash.slice(0, 8)}, ${cachedAgo})`)}`);
 		} else if (info.specExists) {
-			console.log("│   cached: yes (no metadata)");
+			console.log(`  ${pc.cyan("\u25cf")} ${pc.bold(pc.cyan(pad("spec")))}${pc.dim("cached:")} ${yes} ${pc.dim("(no metadata)")}`);
 		} else {
-			console.log("│   cached: no - run 'chowbea-axios fetch' first");
+			console.log(`  ${pc.cyan("\u25cf")} ${pc.bold(pc.cyan(pad("spec")))}${pc.dim("cached:")} ${no} ${pc.dim("- run 'chowbea-axios fetch' first")}`);
 		}
 
 		// Endpoint statistics
 		if (info.methodCounts && info.methodCounts.total > 0) {
-			console.log(`│   endpoints: ${info.methodCounts.total} total`);
-			const methods = [];
+			console.log(`${INDENT}${pc.dim("endpoints:")} ${pc.yellow(String(info.methodCounts.total))} total`);
+			const methods: string[] = [];
 			if (info.methodCounts.get > 0)
-				methods.push(`GET: ${info.methodCounts.get}`);
+				methods.push(`GET: ${pc.yellow(String(info.methodCounts.get))}`);
 			if (info.methodCounts.post > 0)
-				methods.push(`POST: ${info.methodCounts.post}`);
+				methods.push(`POST: ${pc.yellow(String(info.methodCounts.post))}`);
 			if (info.methodCounts.put > 0)
-				methods.push(`PUT: ${info.methodCounts.put}`);
+				methods.push(`PUT: ${pc.yellow(String(info.methodCounts.put))}`);
 			if (info.methodCounts.delete > 0)
-				methods.push(`DELETE: ${info.methodCounts.delete}`);
+				methods.push(`DELETE: ${pc.yellow(String(info.methodCounts.delete))}`);
 			if (info.methodCounts.patch > 0)
-				methods.push(`PATCH: ${info.methodCounts.patch}`);
-			console.log(`│     ${methods.join("  ")}`);
+				methods.push(`PATCH: ${pc.yellow(String(info.methodCounts.patch))}`);
+			console.log(`${INDENT}${methods.join("  ")}`);
 		}
+		console.log();
 
 		// Generated files section
-		console.log("│");
-		console.log("│ Generated:");
 		const { types, operations } = info.fileStatus;
-		console.log(
-			`│   types: ${types.exists ? `yes (${types.modifiedAgo})` : "no"}`
-		);
-		console.log(
-			`│   operations: ${operations.exists ? `yes (${operations.modifiedAgo})` : "no"}`
-		);
+		console.log(`  ${pc.cyan("\u25cf")} ${pc.bold(pc.cyan(pad("generated")))}${pc.dim("types:")} ${types.exists ? `${yes} ${pc.dim(`(${types.modifiedAgo})`)}` : no}`);
+		console.log(`${INDENT}${pc.dim("operations:")} ${operations.exists ? `${yes} ${pc.dim(`(${operations.modifiedAgo})`)}` : no}`);
+		console.log();
 
 		// Client files section
-		console.log("│");
-		console.log("│ Client files:");
 		const clientFiles = ["helpers", "instance", "error", "client"];
 		const allPresent = clientFiles.every((f) => info.fileStatus[f]?.exists);
 		const nonePresent = clientFiles.every((f) => !info.fileStatus[f]?.exists);
 
 		if (allPresent) {
-			console.log("│   all present");
+			console.log(`  ${pc.cyan("\u25cf")} ${pc.bold(pc.cyan(pad("client")))}all present`);
 		} else if (nonePresent) {
-			console.log(
-				"│   none - run 'chowbea-axios init' or 'chowbea-axios generate'"
-			);
+			console.log(`  ${pc.cyan("\u25cf")} ${pc.bold(pc.cyan(pad("client")))}${missing} ${pc.dim("- run 'chowbea-axios init' or 'chowbea-axios generate'")}`);
 		} else {
+			let first = true;
 			for (const file of clientFiles) {
 				const status = info.fileStatus[file];
-				console.log(
-					`│   ${file}: ${status?.exists ? `yes (${status.modifiedAgo})` : "missing"}`
-				);
+				const value = status?.exists ? `${yes} ${pc.dim(`(${status.modifiedAgo})`)}` : missing;
+				if (first) {
+					console.log(`  ${pc.cyan("\u25cf")} ${pc.bold(pc.cyan(pad("client")))}${file}: ${value}`);
+					first = false;
+				} else {
+					console.log(`${INDENT}${file}: ${value}`);
+				}
 			}
 		}
 
-		console.log(`╰${line}`);
 		console.log();
 	}
 }

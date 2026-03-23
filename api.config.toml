@@ -1,0 +1,19 @@
+# Chowbea Axios Configuration
+
+api_endpoint = "http://localhost:3000/openapi.json"
+# spec_file = "./openapi.json"  # Use local file instead of remote
+poll_interval_ms = 10000
+
+[output]
+folder = "src/api"
+
+[instance]
+base_url_env = "API_BASE_URL"
+env_accessor = "process.env"
+token_key = "auth-token"
+auth_mode = "custom"
+with_credentials = true
+timeout = 30000
+
+[watch]
+debug = false

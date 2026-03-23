@@ -26,13 +26,25 @@ export interface WatchConfig {
 }
 
 /**
+ * Auth mode for the generated axios instance interceptor.
+ * - "bearer-localstorage": reads token from localStorage and attaches as Bearer header (SPA pattern)
+ * - "custom": generates a placeholder interceptor with a TODO comment
+ * - "none": no auth interceptor at all
+ */
+export type AuthMode = "bearer-localstorage" | "custom" | "none";
+
+/**
  * Instance configuration for the generated axios client.
  */
 export interface InstanceConfig {
-  /** Environment variable name for base URL (e.g., "VITE_API_URL") */
+  /** Environment variable name for base URL (e.g., "API_BASE_URL") */
   base_url_env: string;
-  /** localStorage key for auth token */
+  /** How to access environment variables (e.g., "process.env" or "import.meta.env") */
+  env_accessor: string;
+  /** localStorage key for auth token (used when auth_mode is "bearer-localstorage") */
   token_key: string;
+  /** Auth interceptor mode */
+  auth_mode: AuthMode;
   /** Whether to include credentials (cookies) in requests */
   with_credentials: boolean;
   /** Request timeout in milliseconds */
@@ -73,8 +85,10 @@ export const DEFAULT_WATCH_CONFIG: WatchConfig = {
  * Default instance configuration values.
  */
 export const DEFAULT_INSTANCE_CONFIG: InstanceConfig = {
-  base_url_env: "VITE_API_URL",
+  base_url_env: "API_BASE_URL",
+  env_accessor: "process.env",
   token_key: "auth-token",
+  auth_mode: "custom",
   with_credentials: true,
   timeout: 30_000,
 };
@@ -83,11 +97,11 @@ export const DEFAULT_INSTANCE_CONFIG: InstanceConfig = {
  * Default configuration values used when auto-creating config.
  */
 export const DEFAULT_CONFIG: ApiConfig = {
-  api_endpoint: "http://localhost:3000/docs/swagger/json",
+  api_endpoint: "http://localhost:3000/openapi.json",
   spec_file: undefined,
   poll_interval_ms: 10_000,
   output: {
-    folder: "app/services/api",
+    folder: "src/api",
   },
   fetch: undefined,
   instance: DEFAULT_INSTANCE_CONFIG,
@@ -95,26 +109,31 @@ export const DEFAULT_CONFIG: ApiConfig = {
 };
 
 /**
- * Default config file template with comments.
+ * Generates config file content from an ApiConfig object.
+ * Single source of truth — used by both auto-create and init command.
  */
-const CONFIG_TEMPLATE = `# Chowbea Axios Configuration
+export function generateConfigTemplate(config: ApiConfig): string {
+  return `# Chowbea Axios Configuration
 
-api_endpoint = "http://localhost:3000/docs/swagger/json"
+api_endpoint = "${config.api_endpoint}"
 # spec_file = "./openapi.json"  # Use local file instead of remote
-poll_interval_ms = 10000
+poll_interval_ms = ${config.poll_interval_ms}
 
 [output]
-folder = "app/services/api"
+folder = "${config.output.folder}"
 
 [instance]
-base_url_env = "VITE_API_URL"
-token_key = "auth-token"
-with_credentials = true
-timeout = 30000
+base_url_env = "${config.instance.base_url_env}"
+env_accessor = "${config.instance.env_accessor}"
+token_key = "${config.instance.token_key}"
+auth_mode = "${config.instance.auth_mode}"
+with_credentials = ${config.instance.with_credentials}
+timeout = ${config.instance.timeout}
 
 [watch]
-debug = false
+debug = ${config.watch.debug}
 `;
+}
 
 /**
  * Finds the project root by walking up to the nearest package.json.
@@ -168,8 +187,8 @@ export async function createDefaultConfig(configPath: string): Promise<void> {
   // Ensure directory exists
   await mkdir(configDir, { recursive: true });
 
-  // Write the config template
-  await writeFile(configPath, CONFIG_TEMPLATE, "utf8");
+  // Write the config template generated from defaults
+  await writeFile(configPath, generateConfigTemplate(DEFAULT_CONFIG), "utf8");
 }
 
 /**
@@ -218,10 +237,21 @@ function validateInstanceConfig(instance: unknown): InstanceConfig {
       ? inst.base_url_env
       : DEFAULT_INSTANCE_CONFIG.base_url_env;
 
+  const env_accessor =
+    typeof inst.env_accessor === "string" && inst.env_accessor.trim().length > 0
+      ? inst.env_accessor
+      : DEFAULT_INSTANCE_CONFIG.env_accessor;
+
   const token_key =
     typeof inst.token_key === "string" && inst.token_key.trim().length > 0
       ? inst.token_key
       : DEFAULT_INSTANCE_CONFIG.token_key;
+
+  const VALID_AUTH_MODES = ["bearer-localstorage", "custom", "none"];
+  const auth_mode =
+    typeof inst.auth_mode === "string" && VALID_AUTH_MODES.includes(inst.auth_mode)
+      ? (inst.auth_mode as InstanceConfig["auth_mode"])
+      : DEFAULT_INSTANCE_CONFIG.auth_mode;
 
   const with_credentials =
     typeof inst.with_credentials === "boolean"
@@ -233,7 +263,7 @@ function validateInstanceConfig(instance: unknown): InstanceConfig {
       ? inst.timeout
       : DEFAULT_INSTANCE_CONFIG.timeout;
 
-  return { base_url_env, token_key, with_credentials, timeout };
+  return { base_url_env, env_accessor, token_key, auth_mode, with_credentials, timeout };
 }
 
 /**

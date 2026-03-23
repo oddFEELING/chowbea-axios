@@ -12,9 +12,11 @@ import {
 	unlink,
 	writeFile,
 } from "node:fs/promises";
+import { findProjectRoot } from "./config.js";
 import type { InstanceConfig, OutputPaths } from "./config.js";
 import { GenerationError } from "./errors.js";
 import type { Logger } from "./logger.js";
+import { detectPackageManager, getDlxCommand } from "./pm.js";
 
 /**
  * Output paths for generated files.
@@ -26,6 +28,8 @@ export type GeneratorPaths = OutputPaths;
  * Result of client files generation.
  */
 export interface ClientFilesResult {
+	/** Whether api.helpers.ts was generated */
+	helpers: boolean;
 	/** Whether api.instance.ts was generated */
 	instance: boolean;
 	/** Whether api.error.ts was generated */
@@ -407,7 +411,7 @@ export type ApiOperations = ReturnType<typeof createOperations>
 
 /**
  * Runs openapi-typescript to generate base types.
- * Uses pnpm dlx to avoid requiring it as a direct dependency.
+ * Uses the detected package manager's dlx command to avoid requiring it as a direct dependency.
  */
 async function generateTypes(
 	specPath: string,
@@ -416,9 +420,15 @@ async function generateTypes(
 ): Promise<void> {
 	logger.info({ specPath, typesPath }, "Generating TypeScript types...");
 
+	const projectRoot = await findProjectRoot();
+	const pm = await detectPackageManager(projectRoot);
+	const [cmd, ...dlxArgs] = getDlxCommand(pm);
+
+	logger.debug({ pm, cmd }, "Using package manager for openapi-typescript");
+
 	const result = spawnSync(
-		"pnpm",
-		["dlx", "openapi-typescript", specPath, "--output", typesPath],
+		cmd,
+		[...dlxArgs, "openapi-typescript", specPath, "--output", typesPath],
 		{
 			stdio: "pipe",
 			cwd: process.cwd(),
@@ -856,45 +866,27 @@ export type { Paths, HttpMethod, Expand, ExpandRecursively };
 }
 
 /**
- * Generates the api.instance.ts file content.
+ * Generates the auth interceptor block based on auth_mode.
  */
-export function generateInstanceFileContent(config: InstanceConfig): string {
-	return `/**
- * Axios instance with authentication interceptor.
- * 
- * This file is generated once by chowbea-axios CLI.
- * You can safely modify this file - it will NOT be overwritten.
- * 
- * Generated: ${new Date().toISOString()}
- */
-
-import axios from "axios";
-
+function generateAuthInterceptor(config: InstanceConfig): string {
+	switch (config.auth_mode) {
+		case "bearer-localstorage":
+			return `
 /** localStorage key for auth token */
 export const tokenKey = "${config.token_key}";
 
 /**
- * Shared Axios instance configured with the API base URL.
- */
-export const axiosInstance = axios.create({
-	baseURL: import.meta.env.${config.base_url_env},
-	withCredentials: ${config.with_credentials},
-	timeout: ${config.timeout},
-});
-
-/**
  * Request interceptor that automatically attaches the auth token.
- * Reads the token from localStorage and adds it to the Authorization header.
+ * Reads the token from localStorage and adds it as a Bearer header.
  */
 axiosInstance.interceptors.request.use(
 	(config) => {
-		// Check if code is running in browser environment
+		// Only access localStorage in browser environments
 		if (typeof window !== "undefined") {
 			const tokenObject = localStorage.getItem(tokenKey);
 
 			if (tokenObject) {
 				try {
-					// Handle both { state: { token } } and plain token string
 					const parsed = JSON.parse(tokenObject);
 					const token = parsed.state?.token || parsed.token || parsed;
 					if (typeof token === "string") {
@@ -910,7 +902,57 @@ axiosInstance.interceptors.request.use(
 		return config;
 	},
 	(error) => Promise.reject(error)
-);
+);`;
+
+		case "custom":
+			return `
+/**
+ * Request interceptor for authentication.
+ * TODO: Implement your auth logic here.
+ *
+ * Examples:
+ *   config.headers.Authorization = \`Bearer \${getToken()}\`;
+ *   config.headers["X-API-Key"] = getApiKey();
+ */
+axiosInstance.interceptors.request.use(
+	(config) => {
+		// Add your auth logic here
+		return config;
+	},
+	(error) => Promise.reject(error)
+);`;
+
+		case "none":
+			return "";
+	}
+}
+
+/**
+ * Generates the api.instance.ts file content.
+ */
+export function generateInstanceFileContent(config: InstanceConfig): string {
+	const authBlock = generateAuthInterceptor(config);
+
+	return `/**
+ * Axios instance with authentication interceptor.
+ *
+ * This file is generated once by chowbea-axios CLI.
+ * You can safely modify this file - it will NOT be overwritten.
+ *
+ * Generated: ${new Date().toISOString()}
+ */
+
+import axios from "axios";
+
+/**
+ * Shared Axios instance configured with the API base URL.
+ */
+export const axiosInstance = axios.create({
+	baseURL: ${config.env_accessor}.${config.base_url_env},
+	withCredentials: ${config.with_credentials},
+	timeout: ${config.timeout},
+});
+${authBlock}
 `;
 }
 
