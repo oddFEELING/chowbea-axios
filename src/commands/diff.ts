@@ -9,16 +9,17 @@ import {
 	ensureOutputFolder,
 	getOutputPaths,
 	loadConfig,
-} from "../lib/config.js";
-import { formatError, SpecNotFoundError } from "../lib/errors.js";
+} from "../core/config.js";
+import { formatError, SpecNotFoundError } from "../core/errors.js";
 import {
 	computeHash,
 	fetchOpenApiSpec,
 	hasLocalSpec,
 	loadCacheMetadata,
 	loadLocalSpec,
-} from "../lib/fetcher.js";
-import { createLogger, getLogLevel } from "../lib/logger.js";
+} from "../core/fetcher.js";
+import { createLogger } from "../core/logger.js";
+import { getLogLevel } from "../adapters/logger-interface.js";
 
 /**
  * Operation metadata for comparison.

@@ -11,20 +11,17 @@ import {
 	getOutputPaths,
 	loadConfig,
 	resolveSpecSource,
-} from "../lib/config.js";
-import { formatError, SpecNotFoundError } from "../lib/errors.js";
+} from "../core/config.js";
+import { formatError, SpecNotFoundError } from "../core/errors.js";
 import {
 	computeHash,
 	hasLocalSpec,
 	loadLocalSpec,
 	saveCacheMetadata,
-} from "../lib/fetcher.js";
-import { generate, generateClientFiles } from "../lib/generator.js";
-import {
-	createLogger,
-	formatDuration,
-	getLogLevel,
-} from "../lib/logger.js";
+} from "../core/fetcher.js";
+import { generate, generateClientFiles } from "../core/generator.js";
+import { createLogger } from "../core/logger.js";
+import { formatDuration, getLogLevel } from "../adapters/logger-interface.js";
 
 /**
  * Generate TypeScript types and operations from local OpenAPI spec.

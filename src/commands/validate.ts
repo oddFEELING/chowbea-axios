@@ -8,14 +8,15 @@ import {
 	ensureOutputFolder,
 	getOutputPaths,
 	loadConfig,
-} from "../lib/config.js";
+} from "../core/config.js";
 import {
 	formatError,
 	SpecNotFoundError,
 	ValidationError,
-} from "../lib/errors.js";
-import { hasLocalSpec, loadLocalSpec } from "../lib/fetcher.js";
-import { createLogger, getLogLevel } from "../lib/logger.js";
+} from "../core/errors.js";
+import { hasLocalSpec, loadLocalSpec } from "../core/fetcher.js";
+import { createLogger } from "../core/logger.js";
+import { getLogLevel } from "../adapters/logger-interface.js";
 
 /**
  * Validation issue with severity and location.

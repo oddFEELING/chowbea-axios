@@ -10,19 +10,16 @@ import {
 	getOutputPaths,
 	loadConfig,
 	resolveSpecSource,
-} from "../lib/config.js";
-import { formatError } from "../lib/errors.js";
+} from "../core/config.js";
+import { formatError } from "../core/errors.js";
 import {
 	fetchOpenApiSpec,
 	loadLocalSpecFile,
 	saveSpec,
-} from "../lib/fetcher.js";
-import { generate, generateClientFiles } from "../lib/generator.js";
-import {
-	createLogger,
-	formatDuration,
-	getLogLevel,
-} from "../lib/logger.js";
+} from "../core/fetcher.js";
+import { generate, generateClientFiles } from "../core/generator.js";
+import { createLogger } from "../core/logger.js";
+import { formatDuration, getLogLevel } from "../adapters/logger-interface.js";
 
 /**
  * Fetch OpenAPI spec from remote endpoint and generate types.

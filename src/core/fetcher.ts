@@ -7,7 +7,7 @@ import { createHash } from "node:crypto";
 import { access, readFile, writeFile } from "node:fs/promises";
 
 import { NetworkError, SpecNotFoundError } from "./errors.js";
-import type { Logger } from "./logger.js";
+import type { Logger } from "../adapters/logger-interface.js";
 
 /**
  * Cache metadata stored in .api-cache.json

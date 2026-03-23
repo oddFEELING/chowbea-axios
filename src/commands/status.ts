@@ -8,14 +8,15 @@ import path from "node:path";
 import pc from "picocolors";
 import { Command, Flags } from "@oclif/core";
 
-import { getOutputPaths, loadConfig } from "../lib/config.js";
-import { formatError } from "../lib/errors.js";
+import { getOutputPaths, loadConfig } from "../core/config.js";
+import { formatError } from "../core/errors.js";
 import {
 	hasLocalSpec,
 	loadCacheMetadata,
 	loadLocalSpec,
-} from "../lib/fetcher.js";
-import { createLogger, getLogLevel } from "../lib/logger.js";
+} from "../core/fetcher.js";
+import { createLogger } from "../core/logger.js";
+import { getLogLevel } from "../adapters/logger-interface.js";
 
 /**
  * HTTP method counts for endpoint statistics.

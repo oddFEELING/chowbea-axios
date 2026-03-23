@@ -23,17 +23,18 @@ import {
   getOutputPaths,
   type InstanceConfig,
   loadConfig,
-} from "../lib/config.js";
-import { formatError } from "../lib/errors.js";
-import { generateClientFiles } from "../lib/generator.js";
-import { createLogger, getLogLevel } from "../lib/logger.js";
+} from "../core/config.js";
+import { formatError } from "../core/errors.js";
+import { generateClientFiles } from "../core/generator.js";
+import { createLogger } from "../core/logger.js";
+import { getLogLevel } from "../adapters/logger-interface.js";
 import {
   detectPackageManager,
   getDlxCommand,
   getInstallCommand,
   getRunCommand,
   type PackageManager,
-} from "../lib/pm.js";
+} from "../core/pm.js";
 
 /**
  * Default npm scripts to add to package.json.
