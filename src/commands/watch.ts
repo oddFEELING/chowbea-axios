@@ -17,7 +17,6 @@ import {
   createLogger,
   formatDuration,
   getLogLevel,
-  logSeparator,
 } from "../lib/logger.js";
 
 /**
@@ -84,7 +83,7 @@ Gracefully handles network failures and preserves cache on shutdown.`;
         level: getLogLevel(flags, config.watch.debug),
       });
 
-      logSeparator(logger, "chowbea-axios watch");
+      logger.header("chowbea-axios watch");
 
       logger.debug("Configuration loaded successfully");
 
@@ -113,10 +112,8 @@ Gracefully handles network failures and preserves cache on shutdown.`;
       const intervalMs = flags.interval ?? config.poll_interval_ms;
       const endpoint = config.api_endpoint;
 
-      logger.info(
-        { endpoint, intervalMs },
-        "Starting watch mode - press Ctrl+C to stop"
-      );
+      logger.step("watch", "Starting watch mode — press Ctrl+C to stop");
+      logger.debug({ endpoint, intervalMs }, "config");
 
       // Set up graceful shutdown handlers
       const shutdown = (signal: string) => {
@@ -174,7 +171,7 @@ Gracefully handles network failures and preserves cache on shutdown.`;
 
     // Only show cycle separator in debug mode
     if (logger.level === "debug") {
-      logSeparator(logger, `Cycle ${cycleId}`);
+      logger.step("cycle", `Cycle ${cycleId}`);
     }
 
     try {

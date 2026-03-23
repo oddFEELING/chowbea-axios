@@ -12,10 +12,13 @@ import { checkbox, confirm, input, select } from "@inquirer/prompts";
 import { Command, Flags } from "@oclif/core";
 
 import {
+  type AuthMode,
   configExists,
+  DEFAULT_CONFIG,
   DEFAULT_INSTANCE_CONFIG,
   ensureOutputFolders,
   findProjectRoot,
+  generateConfigTemplate,
   getConfigPath,
   getOutputPaths,
   type InstanceConfig,
@@ -23,7 +26,14 @@ import {
 } from "../lib/config.js";
 import { formatError } from "../lib/errors.js";
 import { generateClientFiles } from "../lib/generator.js";
-import { createLogger, getLogLevel, logSeparator } from "../lib/logger.js";
+import { createLogger, getLogLevel } from "../lib/logger.js";
+import {
+  detectPackageManager,
+  getDlxCommand,
+  getInstallCommand,
+  getRunCommand,
+  type PackageManager,
+} from "../lib/pm.js";
 
 /**
  * Default npm scripts to add to package.json.
@@ -91,9 +101,18 @@ Detects existing setup and asks before overwriting.`;
       description: "Environment variable name for base URL",
       default: DEFAULT_INSTANCE_CONFIG.base_url_env,
     }),
+    "env-accessor": Flags.string({
+      description: 'How to access env vars (e.g., "process.env" or "import.meta.env")',
+      default: DEFAULT_INSTANCE_CONFIG.env_accessor,
+    }),
     "token-key": Flags.string({
       description: "localStorage key for auth token",
       default: DEFAULT_INSTANCE_CONFIG.token_key,
+    }),
+    "auth-mode": Flags.string({
+      description: "Auth interceptor mode: bearer-localstorage, custom, or none",
+      default: DEFAULT_INSTANCE_CONFIG.auth_mode,
+      options: ["bearer-localstorage", "custom", "none"],
     }),
     "with-credentials": Flags.boolean({
       description: "Include credentials (cookies) in requests",
@@ -124,19 +143,20 @@ Detects existing setup and asks before overwriting.`;
       level: getLogLevel(flags),
     });
 
-    logSeparator(logger, "chowbea-axios init");
+    logger.header("chowbea-axios init");
 
     try {
       // Find project root
+      logger.step("config", "Finding project root...");
       const projectRoot = await findProjectRoot();
-      logger.info({ projectRoot }, "Found project root");
+      logger.info(projectRoot);
 
       // Check for existing setup and notify user
       const existingSetup = await this.detectExistingSetup(projectRoot);
       if (existingSetup.length > 0 && !flags.force) {
-        logger.warn("Existing setup detected:");
+        logger.step("detect", "Existing setup detected");
         for (const item of existingSetup) {
-          logger.warn(`  - ${item}`);
+          logger.info(item);
         }
         const shouldContinue = await confirm({
           message: "Continue with setup? (existing files may be modified)",
@@ -151,28 +171,20 @@ Detects existing setup and asks before overwriting.`;
       // Prompt for API endpoint URL
       const apiEndpoint = await input({
         message: "Enter your OpenAPI spec endpoint URL:",
-        default: "http://localhost:3000/docs/swagger/json",
+        default: DEFAULT_CONFIG.api_endpoint,
       });
 
       // Prompt for output folder location
       const outputFolder = await input({
         message: "Where should generated API files be placed?",
-        default: "app/services/api",
+        default: DEFAULT_CONFIG.output.folder,
         validate: (value) =>
           value.trim().length > 0 || "Output folder is required",
       });
 
-      // Build instance config from flags
-      const instanceConfig: InstanceConfig = {
-        base_url_env: flags["base-url-env"],
-        token_key: flags["token-key"],
-        with_credentials: flags["with-credentials"],
-        timeout: flags.timeout,
-      };
-
       // Detect package manager and confirm with user
-      const detectedPm = await this.detectPackageManager(projectRoot);
-      const pm = await select({
+      const detectedPm = await detectPackageManager(projectRoot);
+      const pm: PackageManager = await select({
         message: "Which package manager are you using?",
         choices: [
           { name: "pnpm", value: "pnpm" as const },
@@ -182,6 +194,39 @@ Detects existing setup and asks before overwriting.`;
         ],
         default: detectedPm,
       });
+
+      // Auto-detect env accessor from framework config files
+      let envAccessor = flags["env-accessor"];
+      if (envAccessor === DEFAULT_INSTANCE_CONFIG.env_accessor) {
+        const hasViteConfig = await this.hasFile(projectRoot, [
+          "vite.config.ts", "vite.config.js", "vite.config.mts",
+        ]);
+        if (hasViteConfig) {
+          envAccessor = "import.meta.env";
+          logger.info("Detected Vite project — using import.meta.env");
+        }
+      }
+
+      // Prompt for auth mode
+      const authMode: AuthMode = await select({
+        message: "How should auth tokens be attached to requests?",
+        choices: [
+          { name: "Bearer token from localStorage (SPA pattern)", value: "bearer-localstorage" as const },
+          { name: "Custom — I'll implement my own auth logic", value: "custom" as const },
+          { name: "None — no auth interceptor needed", value: "none" as const },
+        ],
+        default: flags["auth-mode"] as AuthMode,
+      });
+
+      // Build instance config from flags and prompts
+      const instanceConfig: InstanceConfig = {
+        base_url_env: flags["base-url-env"],
+        env_accessor: envAccessor,
+        token_key: flags["token-key"],
+        auth_mode: authMode,
+        with_credentials: flags["with-credentials"],
+        timeout: flags.timeout,
+      };
 
       // Step 1: Create api.config.toml
       await this.setupConfig(
@@ -219,21 +264,16 @@ Detects existing setup and asks before overwriting.`;
       }
 
       // Summary
-      const runCmd = pm === "npm" ? "npm run" : pm;
-      logSeparator(logger, "Setup Complete");
-      logger.info("");
+      const runCmd = getRunCommand(pm);
       if (isLocalhost) {
-        logger.info("Setup complete! When your API server is running:");
-        logger.info(`  ${runCmd} api:fetch    # Fetch spec and generate types`);
+        logger.done("Setup complete! When your API server is running:");
+        logger.info(`${runCmd} api:fetch    # Fetch spec and generate types`);
       } else {
-        logger.info("Setup complete! Your API client is ready to use.");
-        logger.info("");
-        logger.info("Useful commands:");
-        logger.info(`  ${runCmd} api:status   # Check current status`);
-        logger.info(`  ${runCmd} api:fetch    # Re-fetch spec and regenerate`);
-        logger.info(`  ${runCmd} api:watch    # Watch for spec changes`);
+        logger.done("Setup complete!");
+        logger.info(`${runCmd} api:status   # Check current status`);
+        logger.info(`${runCmd} api:fetch    # Re-fetch spec and regenerate`);
+        logger.info(`${runCmd} api:watch    # Watch for spec changes`);
       }
-      logger.info("");
     } catch (error) {
       logger.error(formatError(error));
       this.exit(1);
@@ -286,19 +326,18 @@ Detects existing setup and asks before overwriting.`;
    */
   private async runInitialFetch(
     projectRoot: string,
-    pm: "pnpm" | "yarn" | "bun" | "npm",
+    pm: PackageManager,
     logger: ReturnType<typeof createLogger>
   ): Promise<void> {
-    logger.info("Fetching OpenAPI spec and generating types...");
+    logger.step("fetch", "Fetching OpenAPI spec and generating types...");
 
-    // Use npx/bunx to run the CLI command
-    const runner = pm === "bun" ? "bunx" : "npx";
-    const result = spawnSync(runner, ["chowbea-axios", "fetch"], {
+    const [cmd, ...dlxArgs] = getDlxCommand(pm);
+    const result = spawnSync(cmd, [...dlxArgs, "chowbea-axios", "fetch"], {
       cwd: projectRoot,
       stdio: "inherit",
     });
 
-    const runCmd = pm === "npm" ? "npm run" : pm;
+    const runCmd = getRunCommand(pm);
     if (result.status !== 0) {
       logger.warn(
         `Initial fetch failed - you can run '${runCmd} api:fetch' later`
@@ -313,7 +352,7 @@ Detects existing setup and asks before overwriting.`;
    */
   private async ensureAxios(
     projectRoot: string,
-    pm: "pnpm" | "yarn" | "bun" | "npm",
+    pm: PackageManager,
     logger: ReturnType<typeof createLogger>
   ): Promise<void> {
     // Check if already installed
@@ -326,29 +365,9 @@ Detects existing setup and asks before overwriting.`;
       return;
     }
 
-    logger.info("Installing axios...");
+    logger.step("deps", "Installing axios...");
 
-    // Build install command based on package manager
-    let cmd: string;
-    let args: string[];
-    switch (pm) {
-      case "yarn":
-        cmd = "yarn";
-        args = ["add", "axios"];
-        break;
-      case "bun":
-        cmd = "bun";
-        args = ["add", "axios"];
-        break;
-      case "npm":
-        cmd = "npm";
-        args = ["install", "axios"];
-        break;
-      default:
-        cmd = "pnpm";
-        args = ["add", "axios"];
-    }
-
+    const [cmd, ...args] = getInstallCommand(pm, "axios");
     const result = spawnSync(cmd, args, {
       cwd: projectRoot,
       stdio: "inherit",
@@ -375,7 +394,7 @@ Detects existing setup and asks before overwriting.`;
     const configPath = getConfigPath(projectRoot);
     const exists = await configExists(configPath);
 
-    logger.info("Setting up api.config.toml...");
+    logger.step("config", "Creating api.config.toml...");
 
     if (exists) {
       if (flags.force) {
@@ -393,42 +412,18 @@ Detects existing setup and asks before overwriting.`;
       }
     }
 
-    // Generate config with instance settings, endpoint, and output folder
-    const configContent = this.generateConfigContent(
-      instanceConfig,
-      apiEndpoint,
-      outputFolder
-    );
+    // Generate config using shared template function
+    const configContent = generateConfigTemplate({
+      api_endpoint: apiEndpoint,
+      poll_interval_ms: 10_000,
+      output: { folder: outputFolder },
+      instance: instanceConfig,
+      watch: { debug: false },
+    });
     await writeFile(configPath, configContent, "utf8");
     logger.info({ path: configPath }, "Created api.config.toml");
   }
 
-  /**
-   * Generates api.config.toml content with instance settings and output folder.
-   */
-  private generateConfigContent(
-    instanceConfig: InstanceConfig,
-    apiEndpoint: string,
-    outputFolder: string
-  ): string {
-    return `# Chowbea Axios Configuration
-
-api_endpoint = "${apiEndpoint}"
-poll_interval_ms = 10000
-
-[output]
-folder = "${outputFolder}"
-
-[instance]
-base_url_env = "${instanceConfig.base_url_env}"
-token_key = "${instanceConfig.token_key}"
-with_credentials = ${instanceConfig.with_credentials}
-timeout = ${instanceConfig.timeout}
-
-[watch]
-debug = false
-`;
-  }
 
   /**
    * Adds npm scripts to package.json.
@@ -440,7 +435,7 @@ debug = false
   ): Promise<void> {
     const packageJsonPath = path.join(projectRoot, "package.json");
 
-    logger.info("Setting up npm scripts...");
+    logger.step("scripts", "Setting up npm scripts...");
 
     // Read existing package.json
     let packageJson: Record<string, unknown>;
@@ -528,7 +523,7 @@ debug = false
     flags: { force: boolean },
     logger: ReturnType<typeof createLogger>
   ): Promise<void> {
-    logger.info("Setting up client files...");
+    logger.step("client", "Generating client files...");
 
     // Load config to get output paths
     const { config } = await loadConfig();
@@ -556,45 +551,6 @@ debug = false
     }
   }
 
-  /**
-   * Detects the package manager based on lockfile presence.
-   * Returns 'pnpm', 'yarn', 'bun', or 'npm'.
-   */
-  private async detectPackageManager(
-    projectRoot: string
-  ): Promise<"pnpm" | "yarn" | "bun" | "npm"> {
-    // Check for lockfiles in order of preference
-    try {
-      await access(path.join(projectRoot, "pnpm-lock.yaml"));
-      return "pnpm";
-    } catch {
-      /* Not found */
-    }
-
-    try {
-      await access(path.join(projectRoot, "yarn.lock"));
-      return "yarn";
-    } catch {
-      /* Not found */
-    }
-
-    try {
-      await access(path.join(projectRoot, "bun.lockb"));
-      return "bun";
-    } catch {
-      /* Not found */
-    }
-
-    try {
-      await access(path.join(projectRoot, "package-lock.json"));
-      return "npm";
-    } catch {
-      /* Not found */
-    }
-
-    // Default to pnpm if no lockfile found
-    return "pnpm";
-  }
 
   /**
    * Sets up a concurrent watch script combining api:watch with user-selected dev scripts.
@@ -602,7 +558,7 @@ debug = false
    */
   private async setupConcurrentlyScript(
     projectRoot: string,
-    pm: "pnpm" | "yarn" | "bun" | "npm",
+    pm: PackageManager,
     logger: ReturnType<typeof createLogger>
   ): Promise<void> {
     // Ask if user wants concurrent dev mode
@@ -613,7 +569,7 @@ debug = false
     });
 
     if (!wantsConcurrent) {
-      logger.info("Skipping concurrent script setup");
+      logger.info("Skipped concurrent script setup");
       return;
     }
 
@@ -676,7 +632,7 @@ debug = false
     }
 
     // Use the confirmed package manager for the run command
-    const runCmd = pm === "npm" ? "npm run" : pm;
+    const runCmd = getRunCommand(pm);
 
     // Build the concurrently command
     const allScripts = ["api:watch", ...selectedScripts];
@@ -704,7 +660,7 @@ debug = false
    */
   private async ensureConcurrently(
     projectRoot: string,
-    pm: "pnpm" | "yarn" | "bun" | "npm",
+    pm: PackageManager,
     logger: ReturnType<typeof createLogger>
   ): Promise<void> {
     const packageJsonPath = path.join(projectRoot, "package.json");
@@ -716,29 +672,9 @@ debug = false
       return;
     }
 
-    logger.info("Installing concurrently...");
+    logger.step("deps", "Installing concurrently...");
 
-    // Build install command based on package manager
-    let cmd: string;
-    let args: string[];
-    switch (pm) {
-      case "yarn":
-        cmd = "yarn";
-        args = ["add", "-D", "concurrently"];
-        break;
-      case "bun":
-        cmd = "bun";
-        args = ["add", "-d", "concurrently"];
-        break;
-      case "npm":
-        cmd = "npm";
-        args = ["install", "-D", "concurrently"];
-        break;
-      default:
-        cmd = "pnpm";
-        args = ["add", "-D", "concurrently"];
-    }
-
+    const [cmd, ...args] = getInstallCommand(pm, "concurrently", true);
     const result = spawnSync(cmd, args, {
       cwd: projectRoot,
       stdio: "inherit",
@@ -751,5 +687,23 @@ debug = false
     } else {
       logger.info("concurrently installed");
     }
+  }
+
+  /**
+   * Checks if any of the given filenames exist in the project root.
+   */
+  private async hasFile(
+    projectRoot: string,
+    filenames: string[]
+  ): Promise<boolean> {
+    for (const filename of filenames) {
+      try {
+        await access(path.join(projectRoot, filename));
+        return true;
+      } catch {
+        /* Not found */
+      }
+    }
+    return false;
   }
 }

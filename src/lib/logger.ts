@@ -1,9 +1,10 @@
 /**
- * Simple CLI logger with ora spinners and vertical flow connectors.
- * Clean, minimal output appropriate for command-line tools.
+ * CLI logger with colored, grouped output.
+ * Turborepo-style sections with colored prefixes.
  */
 
 import path from "node:path";
+import pc from "picocolors";
 import ora, { type Ora } from "ora";
 
 /**
@@ -30,32 +31,49 @@ const LOG_LEVELS: Record<LogLevel, number> = {
   debug: 4,
 };
 
-/** Vertical line connector for log flow */
-const PIPE = "│";
+/** Indentation for sub-messages under a step */
+const INDENT = "              ";
+/** Padding for step labels (right-padded) */
+const LABEL_WIDTH = 10;
 
 /**
- * Simple logger with ora spinner support.
- * Provides clean CLI output with vertical flow connectors.
+ * Pads a label to a fixed width for alignment.
+ */
+function padLabel(label: string): string {
+  return label.padEnd(LABEL_WIDTH);
+}
+
+/**
+ * Logger with grouped section output.
  */
 export interface Logger {
   /** Current log level */
   level: LogLevel;
 
-  /** Log info message - shows with ✓ icon */
+  /** Print command header */
+  header(title: string): void;
+
+  /** Start a grouped step — ● label  message */
+  step(label: string, message: string): void;
+
+  /** Info detail under current step — ✓ message */
   info(message: string): void;
   info(context: Record<string, unknown>, message: string): void;
 
-  /** Log warning - shows with ⚠ icon */
+  /** Warning — ⚠ message in yellow */
   warn(message: string): void;
   warn(context: Record<string, unknown>, message: string): void;
 
-  /** Log error - shows with ✗ icon */
+  /** Error — ✗ message in red */
   error(message: string): void;
   error(context: Record<string, unknown>, message: string): void;
 
-  /** Log debug - only shown in verbose mode */
+  /** Debug detail — dim, only in verbose mode */
   debug(message: string): void;
   debug(context: Record<string, unknown>, message: string): void;
+
+  /** Completion line — ✓ done  message in green */
+  done(message: string): void;
 
   /** Start a spinner for async operations */
   spin(message: string): Ora;
@@ -73,30 +91,31 @@ function shortenPath(value: string): string {
 }
 
 /**
- * Formats a context value, shortening paths automatically.
+ * Formats a context value, shortening paths and coloring.
  */
 function formatValue(value: unknown): string {
   if (typeof value === "string") {
-    // Check if it looks like an absolute path
     if (value.startsWith("/") && value.includes("/")) {
-      return shortenPath(value);
+      return pc.cyan(shortenPath(value));
     }
-    return value;
+    return pc.cyan(value);
   }
-  return JSON.stringify(value);
+  if (typeof value === "number") {
+    return pc.yellow(String(value));
+  }
+  return pc.dim(JSON.stringify(value));
 }
 
 /**
- * Formats context object into a readable string.
- * Shows key=value pairs inline, with paths shortened.
+ * Formats context object into colored key: value lines.
  */
 function formatContext(context: Record<string, unknown>): string {
   const parts: string[] = [];
   for (const [key, value] of Object.entries(context)) {
     if (value === undefined) continue;
-    parts.push(`${key}=${formatValue(value)}`);
+    parts.push(`${pc.dim(key + ":")} ${formatValue(value)}`);
   }
-  return parts.length > 0 ? ` (${parts.join(", ")})` : "";
+  return parts.length > 0 ? parts.join(pc.dim(", ")) : "";
 }
 
 /**
@@ -106,14 +125,11 @@ export function createLogger(options: LoggerOptions = {}): Logger {
   const level = options.level ?? "info";
   const levelPriority = LOG_LEVELS[level];
 
-  // Check if a given level should be logged
   const shouldLog = (msgLevel: LogLevel): boolean =>
     LOG_LEVELS[msgLevel] <= levelPriority;
 
-  // Active spinner reference (only one at a time)
   let activeSpinner: Ora | null = null;
 
-  // Stop any active spinner before logging
   const clearSpinner = () => {
     if (activeSpinner && activeSpinner.isSpinning) {
       activeSpinner.stop();
@@ -124,16 +140,28 @@ export function createLogger(options: LoggerOptions = {}): Logger {
   return {
     level,
 
+    header(title: string) {
+      clearSpinner();
+      console.log();
+      console.log(`  ${pc.bold(title)}`);
+      console.log();
+    },
+
+    step(label: string, message: string) {
+      if (!shouldLog("info")) return;
+      clearSpinner();
+      console.log(`  ${pc.cyan("●")} ${pc.bold(pc.cyan(padLabel(label)))}${message}`);
+    },
+
     info(contextOrMessage: string | Record<string, unknown>, message?: string) {
       if (!shouldLog("info")) return;
       clearSpinner();
 
-      console.log(PIPE);
       if (typeof contextOrMessage === "string") {
-        console.log(`${PIPE} ✓ ${contextOrMessage}`);
+        console.log(`${INDENT}${pc.green("✓")} ${contextOrMessage}`);
       } else {
         const ctx = formatContext(contextOrMessage);
-        console.log(`${PIPE} ✓ ${message}${ctx}`);
+        console.log(`${INDENT}${pc.green("✓")} ${message}${ctx ? `  ${ctx}` : ""}`);
       }
     },
 
@@ -141,59 +169,57 @@ export function createLogger(options: LoggerOptions = {}): Logger {
       if (!shouldLog("warn")) return;
       clearSpinner();
 
-      console.log(PIPE);
       if (typeof contextOrMessage === "string") {
-        console.log(`${PIPE} ⚠ ${contextOrMessage}`);
+        console.log(`  ${pc.yellow("⚠")} ${pc.yellow(padLabel("warn"))}${contextOrMessage}`);
       } else {
         const ctx = formatContext(contextOrMessage);
-        console.log(`${PIPE} ⚠ ${message}${ctx}`);
+        console.log(`  ${pc.yellow("⚠")} ${pc.yellow(padLabel("warn"))}${message}${ctx ? `  ${ctx}` : ""}`);
       }
     },
 
-    error(
-      contextOrMessage: string | Record<string, unknown>,
-      message?: string
-    ) {
+    error(contextOrMessage: string | Record<string, unknown>, message?: string) {
       if (!shouldLog("error")) return;
       clearSpinner();
 
-      console.log(PIPE);
       if (typeof contextOrMessage === "string") {
-        console.error(`${PIPE} ✗ ${contextOrMessage}`);
+        console.error(`  ${pc.red("✗")} ${pc.red(padLabel("error"))}${contextOrMessage}`);
       } else {
         const ctx = formatContext(contextOrMessage);
-        console.error(`${PIPE} ✗ ${message}${ctx}`);
+        console.error(`  ${pc.red("✗")} ${pc.red(padLabel("error"))}${message}${ctx ? `  ${ctx}` : ""}`);
       }
     },
 
-    debug(
-      contextOrMessage: string | Record<string, unknown>,
-      message?: string
-    ) {
+    debug(contextOrMessage: string | Record<string, unknown>, message?: string) {
       if (!shouldLog("debug")) return;
       clearSpinner();
 
-      console.log(PIPE);
       if (typeof contextOrMessage === "string") {
-        console.log(`${PIPE}   ${contextOrMessage}`);
+        console.log(`${INDENT}${pc.dim(contextOrMessage)}`);
       } else {
         const ctx = formatContext(contextOrMessage);
-        console.log(`${PIPE}   ${message}${ctx}`);
+        console.log(`${INDENT}${pc.dim(message)}${ctx ? `  ${ctx}` : ""}`);
       }
+    },
+
+    done(message: string) {
+      if (!shouldLog("info")) return;
+      clearSpinner();
+      console.log();
+      console.log(`  ${pc.green("✓")} ${pc.bold(pc.green(padLabel("done")))}${message}`);
+      console.log();
     },
 
     spin(message: string): Ora {
       clearSpinner();
 
       if (!shouldLog("info")) {
-        // Return a no-op spinner for silent mode
         return ora({ isSilent: true });
       }
 
-      console.log(PIPE);
       activeSpinner = ora({
         text: message,
-        prefixText: PIPE,
+        prefixText: INDENT,
+        color: "cyan",
       }).start();
       return activeSpinner;
     },
@@ -202,17 +228,18 @@ export function createLogger(options: LoggerOptions = {}): Logger {
 
 /**
  * Determines log level from CLI flags and config.
- * Priority: quiet > debug flag > config debug > default (warn)
+ * Priority: quiet > verbose/debug flag > config debug > default (warn)
  */
 export function getLogLevel(
   flags: {
     quiet?: boolean;
+    verbose?: boolean;
     debug?: boolean;
   },
   configDebug?: boolean
 ): LogLevel {
   if (flags.quiet) return "error";
-  if (flags.debug || configDebug) return "debug";
+  if (flags.verbose || flags.debug || configDebug) return "debug";
   return "warn";
 }
 
@@ -225,21 +252,6 @@ export function formatDuration(ms: number): string {
   const minutes = Math.floor(ms / 60_000);
   const seconds = Math.floor((ms % 60_000) / 1000);
   return `${minutes}m ${seconds}s`;
-}
-
-/**
- * Logs a section separator for visual clarity.
- */
-export function logSeparator(_logger: Logger, title?: string): void {
-  if (title) {
-    console.log();
-    console.log(`╭${"─".repeat(40)}`);
-    console.log(`│ ${title}`);
-    console.log(`├${"─".repeat(40)}`);
-  } else {
-    console.log(PIPE);
-    console.log(`╰${"─".repeat(40)}`);
-  }
 }
 
 /**

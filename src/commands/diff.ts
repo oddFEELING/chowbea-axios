@@ -18,7 +18,7 @@ import {
 	loadCacheMetadata,
 	loadLocalSpec,
 } from "../lib/fetcher.js";
-import { createLogger, getLogLevel, logSeparator } from "../lib/logger.js";
+import { createLogger, getLogLevel } from "../lib/logger.js";
 
 /**
  * Operation metadata for comparison.
@@ -84,7 +84,7 @@ Useful to see what changed before running fetch.`;
 			level: getLogLevel(flags),
 		});
 
-		logSeparator(logger, "chowbea-axios diff");
+		logger.header("chowbea-axios diff");
 
 		try {
 			// Load configuration
@@ -173,7 +173,7 @@ Useful to see what changed before running fetch.`;
 			}
 
 			// Report changes
-			logSeparator(logger, "Changes Summary");
+			logger.step("changes", "Changes Summary");
 
 			if (added.length === 0 && removed.length === 0 && modified.length === 0) {
 				logger.info("No changes to operations detected");
@@ -215,15 +215,7 @@ Useful to see what changed before running fetch.`;
 				}
 			}
 
-			logSeparator(logger);
-			logger.info(
-				{
-					added: added.length,
-					removed: removed.length,
-					modified: modified.length,
-				},
-				"Total changes"
-			);
+			logger.done(`${added.length} added, ${removed.length} removed, ${modified.length} modified`);
 			logger.info("\nRun 'chowbea-axios fetch' to apply these changes");
 		} catch (error) {
 			if (error instanceof SpecNotFoundError) {

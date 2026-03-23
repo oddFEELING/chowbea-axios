@@ -15,7 +15,7 @@ import {
 	ValidationError,
 } from "../lib/errors.js";
 import { hasLocalSpec, loadLocalSpec } from "../lib/fetcher.js";
-import { createLogger, getLogLevel, logSeparator } from "../lib/logger.js";
+import { createLogger, getLogLevel } from "../lib/logger.js";
 
 /**
  * Validation issue with severity and location.
@@ -88,7 +88,7 @@ Use --strict to treat warnings as errors.`;
 			level: getLogLevel(flags),
 		});
 
-		logSeparator(logger, "chowbea-axios validate");
+		logger.header("chowbea-axios validate");
 
 		try {
 			// Determine spec path
@@ -104,7 +104,8 @@ Use --strict to treat warnings as errors.`;
 				specPath = outputPaths.spec;
 			}
 
-			logger.info({ specPath }, "Validating OpenAPI spec...");
+			logger.step("validate", "Validating OpenAPI spec...");
+			logger.debug({ specPath }, "spec path");
 
 			// Check if spec exists
 			const exists = await hasLocalSpec(specPath);
@@ -124,25 +125,21 @@ Use --strict to treat warnings as errors.`;
 			const warnings = issues.filter((i) => i.severity === "warning");
 
 			if (errors.length > 0) {
-				logSeparator(logger, "Errors");
+				logger.step("errors", "Errors found");
 				for (const issue of errors) {
 					logger.error({ path: issue.path }, issue.message);
 				}
 			}
 
 			if (warnings.length > 0) {
-				logSeparator(logger, "Warnings");
+				logger.step("warnings", "Warnings found");
 				for (const issue of warnings) {
 					logger.warn({ path: issue.path }, issue.message);
 				}
 			}
 
 			// Summary
-			logSeparator(logger);
-			logger.info(
-				{ errors: errors.length, warnings: warnings.length },
-				"Validation complete"
-			);
+			logger.done(`Validation complete — ${errors.length} errors, ${warnings.length} warnings`);
 
 			// Exit with error if strict mode and warnings exist, or if errors exist
 			if (errors.length > 0 || (flags.strict && warnings.length > 0)) {

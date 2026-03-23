@@ -22,7 +22,6 @@ import {
 	createLogger,
 	formatDuration,
 	getLogLevel,
-	logSeparator,
 } from "../lib/logger.js";
 
 /**
@@ -112,11 +111,11 @@ Falls back to cached spec on network failure.`;
 			level: getLogLevel(flags),
 		});
 
-		logSeparator(logger, "chowbea-axios fetch");
+		logger.header("chowbea-axios fetch");
 
 		try {
 			// Load configuration (auto-creates if missing)
-			logger.info("Loading configuration...");
+			logger.step("config", "Loading configuration...");
 			const { config, projectRoot, configPath, wasCreated } = await loadConfig(
 				flags.config
 			);
@@ -159,10 +158,8 @@ Falls back to cached spec on network failure.`;
 			} else {
 				// Fetch from remote endpoint
 				sourceIdentifier = specSource.endpoint;
-				logger.info(
-					{ endpoint: specSource.endpoint },
-					"Fetching OpenAPI spec..."
-				);
+				logger.step("fetch", "Fetching OpenAPI spec...");
+				logger.debug({ endpoint: specSource.endpoint }, "endpoint");
 
 				fetchResult = await fetchOpenApiSpec({
 					endpoint: specSource.endpoint,
@@ -216,7 +213,7 @@ Falls back to cached spec on network failure.`;
 			}
 
 			// Run generation
-			logger.info("Starting type and operation generation...");
+			logger.step("generate", "Generating types and operations...");
 			const result = await generate({
 				paths: outputPaths,
 				logger,
@@ -227,8 +224,7 @@ Falls back to cached spec on network failure.`;
 
 			// Handle dry-run output
 			if (flags["dry-run"] && result.dryRunResult) {
-				logSeparator(logger);
-				logger.info("Dry run complete - no files written");
+				logger.done("Dry run complete — no files written");
 				logger.info(
 					{ operations: result.dryRunResult.operationCount },
 					"Operations found"
@@ -241,14 +237,7 @@ Falls back to cached spec on network failure.`;
 			}
 
 			// Report success
-			logSeparator(logger);
-			logger.info(
-				{
-					operations: result.operationCount,
-					duration: formatDuration(result.durationMs),
-				},
-				"Fetch and generation completed successfully"
-			);
+			logger.done(`Completed in ${formatDuration(result.durationMs)} — ${result.operationCount} operations`);
 			if (result.typesGenerated) {
 				logger.info({ types: outputPaths.types }, "Types output");
 			}
