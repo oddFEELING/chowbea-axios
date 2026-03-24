@@ -36,7 +36,6 @@ export async function route(argv: string[]): Promise<void> {
 	const args = argv.slice(2); // strip runtime and script path
 	const command = args.find((a) => !a.startsWith("-"));
 	const hasFlag =
-		args.includes("-v") ||
 		args.includes("--version") ||
 		args.includes("-h") ||
 		args.includes("--help") ||

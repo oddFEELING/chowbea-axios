@@ -65,6 +65,7 @@ function printHelp(): void {
     -q, --quiet      Suppress non-error output
     -v, --verbose    Show detailed output
     -h, --help       Show help
+        --version    Show version
         --headless   Force headless mode (auto-detected in non-TTY)
 
   Run 'chowbea-axios <command> --help' for command-specific flags.
@@ -536,6 +537,22 @@ export async function runHeadless(
 
 	// Strip the command name and global-only flags from args for sub-parsers
 	const commandArgs = args.filter((a) => a !== command && a !== "--headless");
+
+	// --version
+	if (args.includes("--version")) {
+		try {
+			const { readFileSync } = await import("node:fs");
+			const { resolve, dirname } = await import("node:path");
+			const { fileURLToPath } = await import("node:url");
+			const thisDir = dirname(fileURLToPath(import.meta.url));
+			const pkgPath = resolve(thisDir, "..", "..", "package.json");
+			const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
+			console.log(`chowbea-axios v${pkg.version}`);
+		} catch {
+			console.log("chowbea-axios (unknown version)");
+		}
+		return;
+	}
 
 	// Check for global --help before routing
 	if (!command || args.includes("--help") || args.includes("-h")) {
