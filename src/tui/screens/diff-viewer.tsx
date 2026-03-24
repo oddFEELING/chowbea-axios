@@ -161,13 +161,13 @@ export function DiffViewerScreen() {
 /** Renders a single operation line with colored HTTP method. */
 function OperationRow({ op }: { op: OperationInfo }) {
 	return (
-		<text fg={colors.fg}>
+		<box flexDirection="row">
 			<text fg={methodColor(op.method)}>
 				{op.method.toUpperCase().padEnd(7)}
 			</text>
-			{`${op.path}  `}
+			<text fg={colors.fg}>{`${op.path}  `}</text>
 			<text fg={colors.fgDim}>{op.operationId}</text>
-		</text>
+		</box>
 	);
 }
 

@@ -81,11 +81,11 @@ export function FetchGenerateScreen() {
 
 			{/* Status / prompt */}
 			{phase === "idle" && (
-				<text fg={colors.fgDim}>
-					{`Press `}
-					<text fg={colors.accent}>Enter</text>
-					{` to fetch spec and generate client code.`}
-				</text>
+				<box flexDirection="row">
+					<text fg={colors.fgDim}>{"Press "}</text>
+					<text fg={colors.accent}>{"Enter"}</text>
+					<text fg={colors.fgDim}>{" to fetch spec and generate client code."}</text>
+				</box>
 			)}
 
 			{phase === "running" && (
@@ -126,36 +126,36 @@ export function FetchGenerateScreen() {
 					<text fg={colors.success}>
 						Fetch Complete
 					</text>
-					<text fg={colors.fgDim}>
-						{`spec changed:  `}
+					<box flexDirection="row">
+						<text fg={colors.fgDim}>{"spec changed:  "}</text>
 						<text
 							fg={result.specChanged ? colors.success : colors.fgDim}
 						>
 							{result.specChanged ? "yes" : "no"}
 						</text>
-					</text>
-					<text fg={colors.fgDim}>
-						{`from cache:    `}
+					</box>
+					<box flexDirection="row">
+						<text fg={colors.fgDim}>{"from cache:    "}</text>
 						<text
 							fg={result.fromCache ? colors.warning : colors.fg}
 						>
 							{result.fromCache ? "yes" : "no"}
 						</text>
-					</text>
-					<text fg={colors.fgDim}>
-						{`operations:    `}
+					</box>
+					<box flexDirection="row">
+						<text fg={colors.fgDim}>{"operations:    "}</text>
 						<text fg={colors.fg}>
 							{String(result.operationCount)}
 						</text>
-					</text>
-					<text fg={colors.fgDim}>
-						{`duration:      `}
+					</box>
+					<box flexDirection="row">
+						<text fg={colors.fgDim}>{"duration:      "}</text>
 						<text fg={colors.fg}>
 							{formatDuration(result.durationMs)}
 						</text>
-					</text>
-					<text fg={colors.fgDim}>
-						{`types:         `}
+					</box>
+					<box flexDirection="row">
+						<text fg={colors.fgDim}>{"types:         "}</text>
 						<text
 							fg={
 								result.typesGenerated
@@ -165,9 +165,9 @@ export function FetchGenerateScreen() {
 						>
 							{result.typesGenerated ? "generated" : "skipped"}
 						</text>
-					</text>
-					<text fg={colors.fgDim}>
-						{`ops output:    `}
+					</box>
+					<box flexDirection="row">
+						<text fg={colors.fgDim}>{"ops output:    "}</text>
 						<text
 							fg={
 								result.operationsGenerated
@@ -179,12 +179,12 @@ export function FetchGenerateScreen() {
 								? "generated"
 								: "skipped"}
 						</text>
-					</text>
-					<text fg={colors.fgDim}>
-						{`Press `}
-						<text fg={colors.accent}>Enter</text>
-						{` to run again.`}
-					</text>
+					</box>
+					<box flexDirection="row">
+						<text fg={colors.fgDim}>{"Press "}</text>
+						<text fg={colors.accent}>{"Enter"}</text>
+						<text fg={colors.fgDim}>{" to run again."}</text>
+					</box>
 				</box>
 			)}
 
@@ -200,11 +200,11 @@ export function FetchGenerateScreen() {
 						Error
 					</text>
 					<text fg={colors.error}>{error}</text>
-					<text fg={colors.fgDim}>
-						{`Press `}
-						<text fg={colors.accent}>Enter</text>
-						{` to retry.`}
-					</text>
+					<box flexDirection="row">
+						<text fg={colors.fgDim}>{"Press "}</text>
+						<text fg={colors.accent}>{"Enter"}</text>
+						<text fg={colors.fgDim}>{" to retry."}</text>
+					</box>
 				</box>
 			)}
 		</box>

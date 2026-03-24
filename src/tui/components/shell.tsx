@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
-import { Sidebar } from "./sidebar.js";
+import { useTerminalDimensions } from "@opentui/react";
+import { Sidebar, type SidebarMode } from "./sidebar.js";
 import { StatusBar } from "./status-bar.js";
 import type { ScreenId } from "../state/types.js";
 import { colors } from "../theme/colors.js";
@@ -9,6 +10,7 @@ interface ShellProps {
 	sidebarFocused: boolean;
 	onNavigate: (screen: ScreenId) => void;
 	children: ReactNode;
+	locked?: boolean;
 }
 
 export function Shell({
@@ -16,15 +18,25 @@ export function Shell({
 	sidebarFocused,
 	onNavigate,
 	children,
+	locked = false,
 }: ShellProps) {
+	const { width } = useTerminalDimensions();
+
+	const sidebarMode: SidebarMode =
+		width >= 80 ? "full" : width >= 60 ? "compact" : "hidden";
+
 	return (
-		<box flexDirection="column" width="100%" height="100%">
-			<box flexGrow={1} flexDirection="row">
+		<box flexDirection="row" width="100%" height="100%">
+			{sidebarMode !== "hidden" && (
 				<Sidebar
 					activeScreen={activeScreen}
 					focused={sidebarFocused}
 					onNavigate={onNavigate}
+					mode={sidebarMode}
+					locked={locked}
 				/>
+			)}
+			<box flexGrow={1} flexDirection="column">
 				<box
 					flexGrow={1}
 					flexDirection="column"
@@ -33,8 +45,8 @@ export function Shell({
 				>
 					{children}
 				</box>
+				<StatusBar screen={activeScreen} locked={locked} />
 			</box>
-			<StatusBar screen={activeScreen} />
 		</box>
 	);
 }

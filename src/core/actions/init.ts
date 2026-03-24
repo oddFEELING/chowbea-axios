@@ -242,16 +242,28 @@ async function ensureAxios(
   const [cmd, ...args] = getInstallCommand(pm, "axios");
   const result = spawnSync(cmd, args, {
     cwd: projectRoot,
-    stdio: "inherit",
+    stdio: "pipe",
+    timeout: 60_000,
   });
 
   if (result.status !== 0) {
+    const stderr = result.stderr?.toString().trim();
+    const stdout = result.stdout?.toString().trim();
+    if (stderr) logger.debug(stderr);
+    if (stdout) logger.debug(stdout);
     logger.warn("Failed to install axios - please install it manually");
     return false;
   }
 
-  logger.info("axios installed");
-  return true;
+  // Verify it was actually installed
+  try {
+    await access(path.join(projectRoot, "node_modules", "axios", "package.json"));
+    logger.info("axios installed");
+    return true;
+  } catch {
+    logger.warn("axios install reported success but package not found in node_modules");
+    return false;
+  }
 }
 
 /**
@@ -400,18 +412,30 @@ async function ensureConcurrently(
   const [cmd, ...args] = getInstallCommand(pm, "concurrently", true);
   const result = spawnSync(cmd, args, {
     cwd: projectRoot,
-    stdio: "inherit",
+    stdio: "pipe",
+    timeout: 60_000,
   });
 
   if (result.status !== 0) {
+    const stderr = result.stderr?.toString().trim();
+    const stdout = result.stdout?.toString().trim();
+    if (stderr) logger.debug(stderr);
+    if (stdout) logger.debug(stdout);
     logger.warn(
-      "Failed to install concurrently - you may need to install it manually",
+      `Failed to install concurrently (exit ${result.status}) - you may need to install it manually`,
     );
     return false;
   }
 
-  logger.info("concurrently installed");
-  return true;
+  // Verify it was actually installed
+  try {
+    await access(path.join(projectRoot, "node_modules", "concurrently", "package.json"));
+    logger.info("concurrently installed");
+    return true;
+  } catch {
+    logger.warn("concurrently install reported success but package not found in node_modules");
+    return false;
+  }
 }
 
 /**
@@ -533,11 +557,13 @@ async function runInitialFetch(
   const [cmd, ...dlxArgs] = getDlxCommand(pm);
   const result = spawnSync(cmd, [...dlxArgs, "chowbea-axios", "fetch"], {
     cwd: projectRoot,
-    stdio: "inherit",
+    stdio: "pipe",
   });
 
   const runCmd = getRunCommand(pm);
   if (result.status !== 0) {
+    const stderr = result.stderr?.toString().trim();
+    if (stderr) logger.debug(stderr);
     logger.warn(
       `Initial fetch failed - you can run '${runCmd} api:fetch' later`,
     );
@@ -627,6 +653,16 @@ export async function executeInit(
     ],
     default: detectedPm,
   });
+
+  // Verify package manager binary exists
+  const pmCheck = spawnSync("which", [pm === "npm" ? "npm" : pm], {
+    stdio: "pipe",
+  });
+  if (pmCheck.status !== 0) {
+    throw new Error(
+      `Package manager "${pm}" not found in PATH. Please install it first.`,
+    );
+  }
 
   // Auto-detect env accessor from framework config files
   let envAccessor = options.envAccessor;

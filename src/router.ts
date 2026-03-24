@@ -3,7 +3,7 @@
  */
 export async function route(argv: string[]): Promise<void> {
 	const args = argv.slice(2); // strip runtime and script path
-	const command = args[0];
+	const command = args.find((a) => !a.startsWith("-"));
 	const isHeadless = !process.stdout.isTTY || args.includes("--headless");
 
 	if (!command && !isHeadless) {

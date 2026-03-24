@@ -6,7 +6,6 @@
 
 import path from "node:path";
 import pc from "picocolors";
-import ora, { type Ora } from "ora";
 
 import type {
 	Logger,
@@ -80,20 +79,10 @@ export function createLogger(options: LoggerOptions = {}): Logger {
 	const shouldLog = (msgLevel: LogLevel): boolean =>
 		LOG_LEVELS[msgLevel] <= levelPriority;
 
-	let activeSpinner: Ora | null = null;
-
-	const clearSpinner = () => {
-		if (activeSpinner && activeSpinner.isSpinning) {
-			activeSpinner.stop();
-			activeSpinner = null;
-		}
-	};
-
 	return {
 		level,
 
 		header(title: string) {
-			clearSpinner();
 			console.log();
 			console.log(`  ${pc.bold(title)}`);
 			console.log();
@@ -101,13 +90,11 @@ export function createLogger(options: LoggerOptions = {}): Logger {
 
 		step(label: string, message: string) {
 			if (!shouldLog("info")) return;
-			clearSpinner();
 			console.log(`  ${pc.cyan("●")} ${pc.bold(pc.cyan(padLabel(label)))}${message}`);
 		},
 
 		info(contextOrMessage: string | Record<string, unknown>, message?: string) {
 			if (!shouldLog("info")) return;
-			clearSpinner();
 
 			if (typeof contextOrMessage === "string") {
 				console.log(`${INDENT}${pc.green("✓")} ${contextOrMessage}`);
@@ -119,7 +106,6 @@ export function createLogger(options: LoggerOptions = {}): Logger {
 
 		warn(contextOrMessage: string | Record<string, unknown>, message?: string) {
 			if (!shouldLog("warn")) return;
-			clearSpinner();
 
 			if (typeof contextOrMessage === "string") {
 				console.log(`  ${pc.yellow("⚠")} ${pc.yellow(padLabel("warn"))}${contextOrMessage}`);
@@ -131,7 +117,6 @@ export function createLogger(options: LoggerOptions = {}): Logger {
 
 		error(contextOrMessage: string | Record<string, unknown>, message?: string) {
 			if (!shouldLog("error")) return;
-			clearSpinner();
 
 			if (typeof contextOrMessage === "string") {
 				console.error(`  ${pc.red("✗")} ${pc.red(padLabel("error"))}${contextOrMessage}`);
@@ -143,7 +128,6 @@ export function createLogger(options: LoggerOptions = {}): Logger {
 
 		debug(contextOrMessage: string | Record<string, unknown>, message?: string) {
 			if (!shouldLog("debug")) return;
-			clearSpinner();
 
 			if (typeof contextOrMessage === "string") {
 				console.log(`${INDENT}${pc.dim(contextOrMessage)}`);
@@ -155,26 +139,19 @@ export function createLogger(options: LoggerOptions = {}): Logger {
 
 		done(message: string) {
 			if (!shouldLog("info")) return;
-			clearSpinner();
 			console.log();
 			console.log(`  ${pc.green("✓")} ${pc.bold(pc.green(padLabel("done")))}${message}`);
 			console.log();
 		},
 
 		startProgress(message: string) {
-			clearSpinner();
-
 			if (!shouldLog("info")) return;
-
-			activeSpinner = ora({
-				text: message,
-				prefixText: INDENT,
-				color: "cyan",
-			}).start();
+			// Simple text-based progress for headless mode
+			console.log(`${INDENT}${pc.cyan("\u23F3")} ${message}`);
 		},
 
 		stopProgress() {
-			clearSpinner();
+			// No-op for text-based progress
 		},
 	};
 }

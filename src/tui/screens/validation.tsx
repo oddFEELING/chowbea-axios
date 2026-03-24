@@ -126,12 +126,12 @@ function IssueRow({ issue }: { issue: ValidationIssue }) {
 		issue.severity === "error" ? colors.error : colors.warning;
 
 	return (
-		<text fg={colors.fg}>
+		<box flexDirection="row">
 			<text fg={color}>
 				{issue.severity === "error" ? "x " : "! "}
 			</text>
 			<text fg={colors.fgDim}>{issue.path}</text>
-			{`  ${issue.message}`}
-		</text>
+			<text fg={colors.fg}>{`  ${issue.message}`}</text>
+		</box>
 	);
 }

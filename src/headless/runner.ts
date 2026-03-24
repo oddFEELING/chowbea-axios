@@ -5,6 +5,7 @@
  * core action, and renders output with the headless logger + formatters.
  */
 
+import { spawnSync } from "node:child_process";
 import { parseArgs } from "node:util";
 
 import { createLogger } from "../adapters/headless-logger.js";
@@ -497,8 +498,44 @@ export async function runHeadless(
 	command: string | undefined,
 	args: string[],
 ): Promise<void> {
-	// Strip the command name from args for sub-parsers
-	const commandArgs = args.slice(1);
+	// Pre-cache openapi-typescript for fetch/generate commands
+	if (command === "fetch" || command === "generate") {
+		const { findProjectRoot } = await import("../core/config.js");
+		const { detectPackageManager, getDlxCommand } = await import(
+			"../core/pm.js"
+		);
+		try {
+			const projectRoot = await findProjectRoot();
+			const pm = await detectPackageManager(projectRoot);
+			const [dlxCmd, ...dlxArgs] = getDlxCommand(pm);
+			const check = spawnSync(
+				dlxCmd,
+				[...dlxArgs, "openapi-typescript", "--version"],
+				{
+					cwd: projectRoot,
+					stdio: "pipe",
+					timeout: 30_000,
+				},
+			);
+			if (check.status !== 0) {
+				// Force download by running --help
+				spawnSync(
+					dlxCmd,
+					[...dlxArgs, "openapi-typescript", "--help"],
+					{
+						cwd: projectRoot,
+						stdio: "pipe",
+						timeout: 60_000,
+					},
+				);
+			}
+		} catch {
+			/* non-fatal */
+		}
+	}
+
+	// Strip the command name and global-only flags from args for sub-parsers
+	const commandArgs = args.filter((a) => a !== command && a !== "--headless");
 
 	// Check for global --help before routing
 	if (!command || args.includes("--help") || args.includes("-h")) {

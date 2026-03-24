@@ -100,56 +100,46 @@ export function WatchModeScreen() {
 	const changedCount = cycles.filter((c) => c.changed).length;
 
 	return (
-		<box flexDirection="column" gap={1}>
-			<text fg={colors.accent}>
-				Watch Mode
-			</text>
+		<box flexDirection="column" flexGrow={1} gap={1}>
+			{/* Header + status — compact single row */}
+			<box flexDirection="row" gap={2}>
+				<text fg={colors.accent}>Watch Mode</text>
 
-			{/* Status */}
-			{phase === "idle" && (
-				<text fg={colors.fgDim}>
-					{`Press `}
-					<text fg={colors.accent}>Enter</text>
-					{` to start watching for spec changes.`}
-				</text>
-			)}
+				{phase === "idle" && (
+					<box flexDirection="row">
+						<text fg={colors.fgDim}>{"Press "}</text>
+						<text fg={colors.accent}>{"Enter"}</text>
+						<text fg={colors.fgDim}>{" to start"}</text>
+					</box>
+				)}
 
-			{phase === "running" && (
-				<box flexDirection="column">
-					<text fg={colors.success}>Watching for changes...</text>
-					<text fg={colors.fgDim}>
-						{`Press `}
-						<text fg={colors.warning}>Escape</text>
-						{` to stop.`}
-					</text>
-				</box>
-			)}
+				{phase === "running" && (
+					<box flexDirection="row">
+						<text fg={colors.success}>{"Watching... "}</text>
+						<text fg={colors.fgDim}>{"Press "}</text>
+						<text fg={colors.warning}>{"Escape"}</text>
+						<text fg={colors.fgDim}>{" to stop"}</text>
+					</box>
+				)}
 
-			{phase === "stopping" && (
-				<text fg={colors.warning}>Stopping watch...</text>
-			)}
+				{phase === "stopping" && (
+					<text fg={colors.warning}>Stopping...</text>
+				)}
+			</box>
 
-			{/* Cycle stats */}
+			{/* Cycle stats — compact inline, no border */}
 			{cycles.length > 0 && (
-				<box
-					border
-					borderColor={colors.border}
-					padding={1}
-					flexDirection="column"
-				>
-					<text fg={colors.fgBright}>
-						Cycles
-					</text>
-					<text fg={colors.fgDim}>
-						{`current:   `}
+				<box flexDirection="row" gap={3}>
+					<box flexDirection="row">
+						<text fg={colors.fgDim}>{"cycle: "}</text>
 						<text fg={colors.fg}>{String(currentCycle)}</text>
-					</text>
-					<text fg={colors.fgDim}>
-						{`completed: `}
+					</box>
+					<box flexDirection="row">
+						<text fg={colors.fgDim}>{"completed: "}</text>
 						<text fg={colors.fg}>{String(cycles.length)}</text>
-					</text>
-					<text fg={colors.fgDim}>
-						{`changes:   `}
+					</box>
+					<box flexDirection="row">
+						<text fg={colors.fgDim}>{"changes: "}</text>
 						<text
 							fg={
 								changedCount > 0
@@ -159,39 +149,33 @@ export function WatchModeScreen() {
 						>
 							{String(changedCount)}
 						</text>
-					</text>
+					</box>
 				</box>
 			)}
 
-			{/* Last error */}
+			{/* Last error — compact, no padding */}
 			{lastError && (
-				<box
-					border
-					borderColor={colors.error}
-					padding={1}
-					flexDirection="column"
-				>
-					<text fg={colors.error}>
-						Last Error
-					</text>
-					<text fg={colors.error}>{lastError}</text>
-				</box>
+				<text fg={colors.error}>{`Error: ${lastError}`}</text>
 			)}
 
-			{/* Recent logs */}
-			{logs.length > 0 && (
-				<box
-					border
-					borderColor={colors.border}
-					padding={1}
-					flexDirection="column"
-					maxHeight={10}
-				>
-					<text fg={colors.fgBright}>
-						Log
-					</text>
-					<scrollbox focused={phase === "running"}>
-						{logs.slice(-20).map((entry, i) => (
+			{/* Log panel — fills ALL remaining space */}
+			<box
+				border
+				borderColor={colors.border}
+				paddingX={1}
+				flexDirection="column"
+				flexGrow={1}
+			>
+				<text fg={colors.fgBright}>Log</text>
+				<scrollbox focused={phase === "running"} flexGrow={1}>
+					{logs.length === 0 ? (
+						<text fg={colors.fgDim}>
+							{phase === "idle"
+								? "Press Enter to start watching..."
+								: "Waiting for output..."}
+						</text>
+					) : (
+						logs.slice(-200).map((entry, i) => (
 							<text
 								key={i}
 								fg={
@@ -204,10 +188,10 @@ export function WatchModeScreen() {
 							>
 								{entry.message}
 							</text>
-						))}
-					</scrollbox>
-				</box>
-			)}
+						))
+					)}
+				</scrollbox>
+			</box>
 		</box>
 	);
 }
