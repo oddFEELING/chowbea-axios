@@ -18,8 +18,17 @@ export async function route(argv: string[]): Promise<void> {
 			const { launchDashboard } = await import("./tui/main.js");
 			await launchDashboard();
 			return;
-		} catch {
-			// OpenTUI not available (Node.js) — fall through to headless
+		} catch (err: unknown) {
+			// Only swallow the Node.js .scm import error — rethrow everything else
+			const code = (err as { code?: string })?.code;
+			if (code === "ERR_UNKNOWN_FILE_EXTENSION") {
+				console.log(
+					"TUI dashboard requires Bun. Install Bun (https://bun.sh) or use headless mode:\n" +
+					"  chowbea-axios <command>\n",
+				);
+			} else {
+				throw err;
+			}
 		}
 	}
 
