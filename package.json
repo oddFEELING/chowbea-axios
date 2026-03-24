@@ -1,7 +1,7 @@
 {
   "name": "chowbea-axios",
-  "version": "1.1.0",
-  "description": "Type-safe axios client that makes api requests a breeze",
+  "version": "2.0.0-alpha.1",
+  "description": "Type-safe axios client with interactive TUI dashboard",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -12,41 +12,32 @@
     }
   },
   "bin": {
-    "chowbea-axios": "bin/run.js"
+    "chowbea-axios": "bin/chowbea-axios.ts"
   },
   "files": [
     "bin",
-    "dist",
-    "oclif.manifest.json"
+    "dist"
   ],
   "scripts": {
-    "build": "tsc && npm run manifest",
-    "manifest": "oclif manifest",
+    "build": "tsc",
     "dev": "tsc --watch",
-    "clean": "rm -rf dist oclif.manifest.json",
+    "clean": "rm -rf dist",
     "prepublishOnly": "npm run build",
     "test": "echo \"No tests configured\""
   },
-  "oclif": {
-    "bin": "chowbea-axios",
-    "dirname": "chowbea-axios",
-    "commands": "./dist/commands",
-    "topicSeparator": " "
-  },
   "dependencies": {
     "@inquirer/prompts": "^7.0.0",
-    "@oclif/core": "^4.0.0",
+    "@opentui/core": "^0.1.90",
+    "@opentui/react": "^0.1.90",
     "ora": "^8.0.0",
     "picocolors": "^1.1.1",
+    "react": "^19.2.4",
     "toml": "^3.0.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
-    "oclif": "^4.22.65",
+    "@types/react": "^19.2.14",
     "typescript": "^5.9.0"
-  },
-  "engines": {
-    "node": ">=18.0.0"
   },
   "keywords": [
     "axios",
@@ -54,7 +45,8 @@
     "typescript",
     "openapi",
     "codegen",
-    "cli"
+    "cli",
+    "tui"
   ],
   "homepage": "https://axios.chowbea.com",
   "bugs": {

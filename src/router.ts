@@ -7,12 +7,8 @@ export async function route(argv: string[]): Promise<void> {
 	const isHeadless = !process.stdout.isTTY || args.includes("--headless");
 
 	if (!command && !isHeadless) {
-		// Launch TUI dashboard
-		// TODO: Will be implemented in Phase 3
-		console.log(
-			"TUI dashboard coming soon. Use a command (e.g., 'fetch', 'status') for now.",
-		);
-		process.exitCode = 0;
+		const { launchDashboard } = await import("./tui/main.js");
+		await launchDashboard();
 		return;
 	}
 
