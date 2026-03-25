@@ -93,10 +93,10 @@ export function formatStatusOutput(result: StatusResult): string {
 	// Generated files section
 	const { types, operations } = result.fileStatus;
 	lines.push(
-		`  ${pc.cyan("\u25cf")} ${pc.bold(pc.cyan(pad("generated")))}${pc.dim("types:")} ${types?.exists ? `${yes} ${pc.dim(`(${types.modifiedAgo})`)}` : no}`,
+		`  ${pc.cyan("\u25cf")} ${pc.bold(pc.cyan(pad("generated")))}${pc.dim("types:")} ${types?.exists ? `${yes}${types.modifiedAgo ? ` ${pc.dim(`(${types.modifiedAgo})`)}` : ""}` : no}`,
 	);
 	lines.push(
-		`${INDENT}${pc.dim("operations:")} ${operations?.exists ? `${yes} ${pc.dim(`(${operations.modifiedAgo})`)}` : no}`,
+		`${INDENT}${pc.dim("operations:")} ${operations?.exists ? `${yes}${operations.modifiedAgo ? ` ${pc.dim(`(${operations.modifiedAgo})`)}` : ""}` : no}`,
 	);
 	lines.push("");
 
@@ -122,7 +122,7 @@ export function formatStatusOutput(result: StatusResult): string {
 		for (const file of clientFiles) {
 			const status = result.fileStatus[file];
 			const value = status?.exists
-				? `${yes} ${pc.dim(`(${status.modifiedAgo})`)}`
+				? `${yes}${status.modifiedAgo ? ` ${pc.dim(`(${status.modifiedAgo})`)}` : ""}`
 				: missing;
 			if (first) {
 				lines.push(

@@ -55,6 +55,9 @@
     "type": "git",
     "url": "git+ssh://git@github.com/oddFEELING/chowbea-axios.git"
   },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "license": "MIT",
   "author": "Emmanuel Alawode"
 }

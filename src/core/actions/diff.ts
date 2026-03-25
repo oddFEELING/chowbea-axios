@@ -169,16 +169,14 @@ export async function executeDiff(
 			newHash = fetchResult.hash;
 		}
 
-		// Check hash against cache for identical detection
-		const cacheMetadata = await loadCacheMetadata(outputPaths.cache);
-
-		if (cacheMetadata && cacheMetadata.hash === newHash && !options.specFile) {
+		// Check hash against cache for identical detection (reuse already-loaded metadata)
+		if (currentSpecHash && currentSpecHash === newHash && !options.specFile) {
 			return {
 				added: [],
 				removed: [],
 				modified: [],
 				identical: true,
-				currentSpecHash: cacheMetadata.hash,
+				currentSpecHash,
 				newSpecHash: newHash,
 			};
 		}

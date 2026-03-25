@@ -3,7 +3,7 @@
  * Returns structured data for UI rendering; does not print anything.
  */
 
-import { access, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import path from "node:path";
 
 import type { Logger } from "../../adapters/logger-interface.js";
@@ -126,7 +126,6 @@ export async function checkGeneratedFiles(
 
 	for (const [name, filePath] of Object.entries(files)) {
 		try {
-			await access(filePath);
 			const stats = await stat(filePath);
 			status[name] = {
 				exists: true,

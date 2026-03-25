@@ -15,7 +15,7 @@ import {
  * Checks whether a shell command exists on the system PATH.
  */
 function commandExists(cmd: string): boolean {
-	const result = spawnSync("which", [cmd], { stdio: "pipe" });
+	const result = spawnSync(cmd, ["--version"], { stdio: "pipe" });
 	return result.status === 0;
 }
 
@@ -111,7 +111,7 @@ async function ensureProjectDependencies(): Promise<void> {
 			console.log("Installing project dependencies...");
 			const pm = await detectPackageManager(projectRoot);
 			// Verify PM binary exists
-			if (!commandExists(pm === "npm" ? "npm" : pm)) {
+			if (!commandExists(pm)) {
 				console.error(
 					`Package manager "${pm}" not found. Please install it first.`,
 				);

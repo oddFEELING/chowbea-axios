@@ -40,7 +40,7 @@ export async function route(argv: string[]): Promise<void> {
 		args.includes("-h") ||
 		args.includes("--help") ||
 		args.includes("--headless");
-	const isHeadless = !process.stdout.isTTY || hasFlag;
+	const isHeadless = !process.stdout.isTTY || !process.stdin.isTTY || hasFlag;
 
 	if (!command && !isHeadless) {
 		// Already running under Bun — import TUI directly

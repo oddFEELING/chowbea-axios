@@ -16,21 +16,15 @@ const SCREENS: Array<{ id: ScreenId; label: string; altLabel?: string; key: stri
 
 interface SidebarProps {
 	activeScreen: ScreenId;
-	focused: boolean;
-	onNavigate: (screen: ScreenId) => void;
 	mode: SidebarMode;
 	locked?: boolean;
 }
 
 export function Sidebar({
 	activeScreen,
-	focused: _focused,
-	onNavigate: _onNavigate,
 	mode,
 	locked = false,
 }: SidebarProps) {
-	void _onNavigate;
-	void _focused;
 
 	if (mode === "hidden") {
 		return null;

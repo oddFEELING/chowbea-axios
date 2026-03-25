@@ -67,6 +67,7 @@ export function CommandPalette({ onSelect, onClose, onQuit }: CommandPaletteProp
 		}
 
 		if (key.name === "up") {
+			if (filteredItems.length === 0) return;
 			setSelectedIndex((prev) =>
 				prev > 0 ? prev - 1 : filteredItems.length - 1,
 			);
@@ -74,6 +75,7 @@ export function CommandPalette({ onSelect, onClose, onQuit }: CommandPaletteProp
 		}
 
 		if (key.name === "down") {
+			if (filteredItems.length === 0) return;
 			setSelectedIndex((prev) =>
 				prev < filteredItems.length - 1 ? prev + 1 : 0,
 			);
@@ -81,6 +83,7 @@ export function CommandPalette({ onSelect, onClose, onQuit }: CommandPaletteProp
 		}
 
 		if (key.name === "return") {
+			if (filteredItems.length === 0) return;
 			const item = filteredItems[selectedIndex];
 			if (item) {
 				if (item.action) {

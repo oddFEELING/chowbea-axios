@@ -393,6 +393,12 @@ async function handleWatch(args: string[]): Promise<void> {
 
 	const intervalMs = values.interval ? parseInt(values.interval, 10) : undefined;
 
+	if (intervalMs !== undefined && (isNaN(intervalMs) || intervalMs <= 0)) {
+		console.error(`Invalid interval value: "${values.interval}". Must be a positive number of milliseconds.`);
+		process.exitCode = 1;
+		return;
+	}
+
 	// Setup SIGINT handler for graceful shutdown
 	const controller = new AbortController();
 	const onSigint = () => {
@@ -462,6 +468,14 @@ async function handleInit(args: string[]): Promise<void> {
 	});
 	const logger = createLogger({ level });
 
+	const VALID_AUTH_MODES: readonly string[] = ["bearer-localstorage", "custom", "none"];
+	const rawAuthMode = values["auth-mode"] ?? DEFAULT_INSTANCE_CONFIG.auth_mode;
+	if (!VALID_AUTH_MODES.includes(rawAuthMode)) {
+		console.error(`Invalid auth-mode: "${rawAuthMode}". Must be one of: ${VALID_AUTH_MODES.join(", ")}`);
+		process.exitCode = 1;
+		return;
+	}
+
 	const options: InitActionOptions = {
 		force: values.force ?? false,
 		skipScripts: values["skip-scripts"] ?? false,
@@ -471,7 +485,7 @@ async function handleInit(args: string[]): Promise<void> {
 		envAccessor:
 			values["env-accessor"] ?? DEFAULT_INSTANCE_CONFIG.env_accessor,
 		tokenKey: values["token-key"] ?? DEFAULT_INSTANCE_CONFIG.token_key,
-		authMode: (values["auth-mode"] as AuthMode) ?? DEFAULT_INSTANCE_CONFIG.auth_mode,
+		authMode: rawAuthMode as AuthMode,
 		withCredentials: values["with-credentials"] ?? DEFAULT_INSTANCE_CONFIG.with_credentials,
 		timeout: parseInt(values.timeout ?? String(DEFAULT_INSTANCE_CONFIG.timeout), 10),
 	};

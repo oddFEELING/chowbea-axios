@@ -117,13 +117,16 @@ export function App() {
 				return <EndpointInspectorScreen setInputMode={setInputMode} />;
 			case "env":
 				return <EnvManagerScreen setInputMode={setInputMode} />;
+			default: {
+				const _exhaustive: never = state.activeScreen;
+				return <text fg="#f7768e">Unknown screen: {_exhaustive}</text>;
+			}
 		}
 	};
 
 	const handlePaletteSelect = useCallback(
 		(screen: ScreenId) => {
 			dispatch({ type: "NAVIGATE", screen });
-			dispatch({ type: "CLOSE_COMMAND_PALETTE" });
 		},
 		[],
 	);
@@ -139,8 +142,6 @@ export function App() {
 	return (
 		<Shell
 			activeScreen={state.initialized ? state.activeScreen : "init"}
-			sidebarFocused={state.sidebarFocused}
-			onNavigate={navigate}
 			locked={!state.initialized}
 		>
 			{state.quitDialogOpen ? (

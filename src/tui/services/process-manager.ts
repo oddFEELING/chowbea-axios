@@ -4,6 +4,7 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
+import { delimiter } from "node:path";
 
 const MAX_OUTPUT_LINES = 500;
 
@@ -55,7 +56,7 @@ class ProcessManager {
 		const existingPath = process.env[pathKey] ?? "";
 		const env = {
 			...process.env,
-			[pathKey]: `${binDir}:${existingPath}`,
+			[pathKey]: `${binDir}${delimiter}${existingPath}`,
 		};
 
 		const child = spawn(shell, shellArgs, { cwd: projectRoot, env });
@@ -89,13 +90,30 @@ class ProcessManager {
 		child.stdout?.on("data", (chunk: Buffer) => appendOutput(chunk, "stdout"));
 		child.stderr?.on("data", (chunk: Buffer) => appendOutput(chunk, "stderr"));
 
-		child.on("close", (code) => {
+		child.on("error", (err) => {
 			this.children.delete(id);
 			this.processes = this.processes.map((p) => {
 				if (p.id !== id) return p;
 				return {
 					...p,
-					status: code === 0 ? "stopped" : "crashed",
+					output: [
+						...p.output,
+						{ text: `Failed to start: ${err.message}`, stream: "stderr" as const },
+					].slice(-MAX_OUTPUT_LINES),
+					status: "crashed",
+					exitCode: null,
+				};
+			});
+			this.notify();
+		});
+
+		child.on("close", (code, signal) => {
+			this.children.delete(id);
+			this.processes = this.processes.map((p) => {
+				if (p.id !== id) return p;
+				return {
+					...p,
+					status: code === 0 || signal != null ? "stopped" : "crashed",
 					exitCode: code,
 				};
 			});

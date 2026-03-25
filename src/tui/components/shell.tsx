@@ -7,16 +7,12 @@ import { colors } from "../theme/colors.js";
 
 interface ShellProps {
 	activeScreen: ScreenId;
-	sidebarFocused: boolean;
-	onNavigate: (screen: ScreenId) => void;
 	children: ReactNode;
 	locked?: boolean;
 }
 
 export function Shell({
 	activeScreen,
-	sidebarFocused,
-	onNavigate,
 	children,
 	locked = false,
 }: ShellProps) {
@@ -30,8 +26,6 @@ export function Shell({
 			{sidebarMode !== "hidden" && (
 				<Sidebar
 					activeScreen={activeScreen}
-					focused={sidebarFocused}
-					onNavigate={onNavigate}
 					mode={sidebarMode}
 					locked={locked}
 				/>

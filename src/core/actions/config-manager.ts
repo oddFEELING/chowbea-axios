@@ -15,21 +15,9 @@ import {
 	loadConfig,
 	type ApiConfig,
 } from "../config.js";
+import { DEFAULT_SCRIPTS } from "./init.js";
 import { generateClientFiles } from "../generator.js";
 import type { Logger } from "../../adapters/logger-interface.js";
-
-// ---------------------------------------------------------------------------
-// Default npm scripts (mirrors init.ts DEFAULT_SCRIPTS)
-// ---------------------------------------------------------------------------
-
-const DEFAULT_SCRIPTS: Record<string, string> = {
-	"api:generate": "chowbea-axios generate",
-	"api:fetch": "chowbea-axios fetch",
-	"api:watch": "chowbea-axios watch",
-	"api:status": "chowbea-axios status",
-	"api:validate": "chowbea-axios validate",
-	"api:diff": "chowbea-axios diff",
-};
 
 // ---------------------------------------------------------------------------
 // Save config
@@ -75,9 +63,7 @@ export async function loadCurrentConfig(): Promise<{
 export async function regenerateClientFiles(
 	logger: Logger,
 ): Promise<{ helpers: boolean; instance: boolean; error: boolean; client: boolean }> {
-	const projectRoot = await findProjectRoot();
-	const configPath = getConfigPath(projectRoot);
-	const { config } = await loadConfig(configPath);
+	const { config, projectRoot } = await loadCurrentConfig();
 	const outputPaths = getOutputPaths(config, projectRoot);
 
 	await ensureOutputFolders(outputPaths);
@@ -107,8 +93,16 @@ export async function syncScripts(): Promise<{
 	const projectRoot = await findProjectRoot();
 	const packageJsonPath = path.join(projectRoot, "package.json");
 
-	const content = await readFile(packageJsonPath, "utf8");
-	const packageJson = JSON.parse(content) as Record<string, unknown>;
+	let content: string;
+	let packageJson: Record<string, unknown>;
+	try {
+		content = await readFile(packageJsonPath, "utf8");
+		packageJson = JSON.parse(content) as Record<string, unknown>;
+	} catch (err) {
+		throw new Error(
+			`Could not read or parse package.json at ${packageJsonPath}: ${err instanceof Error ? err.message : String(err)}`,
+		);
+	}
 
 	if (!packageJson.scripts || typeof packageJson.scripts !== "object") {
 		packageJson.scripts = {};

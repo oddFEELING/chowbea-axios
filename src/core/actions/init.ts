@@ -100,7 +100,7 @@ export interface InitResult {
 // Default npm scripts to add to package.json
 // ---------------------------------------------------------------------------
 
-const DEFAULT_SCRIPTS: Record<string, string> = {
+export const DEFAULT_SCRIPTS: Record<string, string> = {
   "api:generate": "chowbea-axios generate",
   "api:fetch": "chowbea-axios fetch",
   "api:watch": "chowbea-axios watch",
@@ -513,7 +513,12 @@ async function setupConcurrentlyScript(
     const label = await prompts.input({
       message: `Short label for "${scriptName}" (shown in terminal output):`,
       default: defaultLabel || "cmd",
-      validate: (value) => (value.trim().length > 0 ? true : "Label is required"),
+      validate: (value) => {
+        if (!value.trim()) return "Label is required";
+        if (!/^[a-zA-Z0-9_-]+$/.test(value.trim()))
+          return "Label must contain only letters, numbers, dashes, or underscores";
+        return true;
+      },
     });
     labels[scriptName] = label.trim();
   }
@@ -631,6 +636,8 @@ export async function executeInit(
   const apiEndpoint = await prompts.input({
     message: "Enter your OpenAPI spec endpoint URL:",
     default: DEFAULT_CONFIG.api_endpoint,
+    validate: (value) =>
+      value.trim().length > 0 ? true : "API endpoint URL is required",
   });
 
   // Prompt for output folder location
@@ -655,7 +662,7 @@ export async function executeInit(
   });
 
   // Verify package manager binary exists
-  const pmCheck = spawnSync("which", [pm === "npm" ? "npm" : pm], {
+  const pmCheck = spawnSync(pm, ["--version"], {
     stdio: "pipe",
   });
   if (pmCheck.status !== 0) {
@@ -699,7 +706,7 @@ export async function executeInit(
   });
 
   // Build instance config from options and prompts
-  const instanceConfig: InstanceConfig = {
+  let instanceConfig: InstanceConfig = {
     base_url_env: options.baseUrlEnv,
     env_accessor: envAccessor,
     token_key: options.tokenKey,
@@ -718,6 +725,24 @@ export async function executeInit(
     logger,
     prompts,
   );
+
+  // If the user declined overwrite, reload the effective config from disk
+  // so subsequent steps use the persisted settings, not the wizard answers.
+  if (!configCreated) {
+    try {
+      const { config } = await loadConfig();
+      instanceConfig = {
+        base_url_env: config.instance.base_url_env,
+        env_accessor: config.instance.env_accessor,
+        token_key: config.instance.token_key,
+        auth_mode: config.instance.auth_mode,
+        with_credentials: config.instance.with_credentials,
+        timeout: config.instance.timeout,
+      };
+    } catch {
+      // Config parsing failed — continue with prompted values as fallback
+    }
+  }
 
   // Step 2: Install axios dependency
   const axiosInstalled = await ensureAxios(projectRoot, pm, logger);

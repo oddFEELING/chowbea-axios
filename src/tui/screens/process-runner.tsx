@@ -160,18 +160,18 @@ export function ProcessScreen({ setInputMode }: ProcessScreenProps) {
 			return;
 		}
 
-		// Left/Right — switch tabs (only when NOT in palette search)
-		if (!activeTab?.processId && key.name !== "left" && key.name !== "right") {
-			// Let the ScriptPalette handle its own keys
-			return;
-		}
-
+		// Left/Right — switch tabs (always available)
 		if (key.name === "left") {
 			tabStore.prevTab();
 			return;
 		}
 		if (key.name === "right") {
 			tabStore.nextTab();
+			return;
+		}
+
+		// When in palette mode (no active process), let ScriptPalette handle other keys
+		if (!activeTab?.processId) {
 			return;
 		}
 

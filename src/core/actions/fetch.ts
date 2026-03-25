@@ -90,6 +90,11 @@ export async function executeFetch(
 		);
 	}
 
+	// Validate flag combination early
+	if (options.typesOnly && options.operationsOnly) {
+		throw new Error("Cannot use --types-only and --operations-only together");
+	}
+
 	// Get output paths
 	const outputPaths = getOutputPaths(config, projectRoot);
 	logger.debug({ outputPaths }, "Resolved output paths");
@@ -175,11 +180,6 @@ export async function executeFetch(
 		instanceConfig: config.instance,
 		logger,
 	});
-
-	// Validate flag combination
-	if (options.typesOnly && options.operationsOnly) {
-		throw new Error("Cannot use --types-only and --operations-only together");
-	}
 
 	// Run generation
 	logger.step("generate", "Generating types and operations...");

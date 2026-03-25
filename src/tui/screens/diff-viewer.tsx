@@ -150,6 +150,11 @@ export function DiffViewerScreen() {
 									{`  body: ${change.old.hasRequestBody ? "yes" : "no"} -> ${change.new.hasRequestBody ? "yes" : "no"}`}
 								</text>
 							)}
+							{change.old.summary !== change.new.summary && (
+								<text fg={colors.fgDim}>
+									{`  summary changed`}
+								</text>
+							)}
 						</box>
 					))}
 				</box>

@@ -27,6 +27,7 @@ export function createTuiLogger(level: LogLevel = "info"): {
 	getLogs: () => LogEntry[];
 	clearLogs: () => void;
 } {
+	const MAX_LOG_ENTRIES = 1000;
 	const logs: LogEntry[] = [];
 	const levelPriority = LOG_LEVELS[level];
 
@@ -34,6 +35,9 @@ export function createTuiLogger(level: LogLevel = "info"): {
 		LOG_LEVELS[msgLevel] <= levelPriority;
 
 	const addLog = (entry: LogEntry): void => {
+		if (logs.length >= MAX_LOG_ENTRIES) {
+			logs.splice(0, logs.length - MAX_LOG_ENTRIES + 1);
+		}
 		logs.push(entry);
 	};
 

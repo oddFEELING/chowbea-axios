@@ -148,7 +148,9 @@ function parseLine(line: string): EnvVar | null {
 function serializeLine(v: EnvVar): string {
 	let valuePart: string;
 	if (needsQuoting(v.value)) {
-		valuePart = `"${v.value}"`;
+		// Escape backslashes and double quotes inside the value
+		const escaped = v.value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+		valuePart = `"${escaped}"`;
 	} else {
 		valuePart = v.value;
 	}

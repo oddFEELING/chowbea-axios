@@ -189,6 +189,17 @@ function resolveSchema(
 		const result = resolveSchema(resolved, spec, depth, maxDepth, visited);
 		if (result) {
 			result.refName = name;
+			// Merge sibling keywords from the original schema alongside $ref
+			// (valid in OpenAPI 3.1, commonly used for description overrides)
+			if (typeof schema.description === "string" && !result.description) {
+				result.description = schema.description;
+			}
+			if (schema.nullable === true) {
+				result.nullable = true;
+			}
+			if (schema.default !== undefined && result.default === undefined) {
+				result.default = schema.default;
+			}
 		}
 		return result;
 	}
