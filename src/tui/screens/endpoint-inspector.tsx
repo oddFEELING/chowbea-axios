@@ -304,30 +304,44 @@ export function EndpointInspectorScreen({ setInputMode }: { setInputMode?: (v: b
 	const filtered = useMemo(() => {
 		if (!searchQuery) return endpoints;
 
-		// ">" prefix — search summary only
-		if (searchQuery.startsWith(">")) {
+		// "#" prefix — summary + operationId + path
+		if (searchQuery.startsWith("#")) {
 			const q = searchQuery.slice(1).trim().toLowerCase();
 			if (!q) return endpoints;
 			return endpoints.filter(
-				(ep) => ep.summary?.toLowerCase().includes(q),
+				(ep) =>
+					ep.summary?.toLowerCase().includes(q) ||
+					ep.operationId?.toLowerCase().includes(q) ||
+					ep.path.toLowerCase().includes(q),
 			);
 		}
 
-		// Default — search all fields
+		// ">" prefix — all fields
+		if (searchQuery.startsWith(">")) {
+			const q = searchQuery.slice(1).trim().toLowerCase();
+			if (!q) return endpoints;
+			return endpoints.filter((ep) => {
+				const haystack = [
+					ep.path,
+					ep.method,
+					ep.operationId,
+					ep.summary,
+					...(ep.tags ?? []),
+				]
+					.filter(Boolean)
+					.join(" ")
+					.toLowerCase();
+				return haystack.includes(q);
+			});
+		}
+
+		// Default — summary + operationId
 		const q = searchQuery.toLowerCase();
-		return endpoints.filter((ep) => {
-			const haystack = [
-				ep.path,
-				ep.method,
-				ep.operationId,
-				ep.summary,
-				...(ep.tags ?? []),
-			]
-				.filter(Boolean)
-				.join(" ")
-				.toLowerCase();
-			return haystack.includes(q);
-		});
+		return endpoints.filter(
+			(ep) =>
+				ep.summary?.toLowerCase().includes(q) ||
+				ep.operationId?.toLowerCase().includes(q),
+		);
 	}, [endpoints, searchQuery]);
 
 	// Reset selection when filter changes
@@ -822,7 +836,7 @@ export function EndpointInspectorScreen({ setInputMode }: { setInputMode?: (v: b
 				height={3}
 			>
 				<input
-					placeholder="/ Search endpoints (path, method, operationId, tag)..."
+					placeholder="/ Search summary + opId  # + paths  > all fields"
 					onInput={handleSearch}
 					focused={focusPanel === "search"}
 					textColor={colors.fg}

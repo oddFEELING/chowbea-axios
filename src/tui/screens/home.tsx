@@ -4,6 +4,9 @@
  */
 
 import { useState, useEffect } from "react";
+import { readFileSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 import { colors } from "../theme/colors.js";
 import {
 	executeStatus,
@@ -11,6 +14,17 @@ import {
 	type MethodCounts,
 } from "../../core/actions/status.js";
 import { createTuiLogger } from "../adapters/tui-logger.js";
+
+function getVersion(): string {
+	try {
+		const thisDir = dirname(fileURLToPath(import.meta.url));
+		const pkgPath = resolve(thisDir, "..", "..", "..", "package.json");
+		const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
+		return pkg.version;
+	} catch {
+		return "unknown";
+	}
+}
 
 const LOGO = [
 	"        __                    __                                  _           ",
@@ -43,6 +57,7 @@ export function HomeScreen() {
 	const [result, setResult] = useState<StatusResult | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [loading, setLoading] = useState(true);
+	const version = getVersion();
 
 	useEffect(() => {
 		const { logger } = createTuiLogger("warn");
@@ -70,7 +85,11 @@ export function HomeScreen() {
 					{LOGO.map((line, i) => (
 						<text key={i} fg={colors.accent}>{line}</text>
 					))}
-					<text fg={colors.fgDim}>{`  ${TAGLINE}`}</text>
+					<text>{""}</text>
+					<box flexDirection="row">
+						<text fg={colors.fgDim}>{`  ${TAGLINE}  `}</text>
+						<text fg={colors.accent}>{`v${version}`}</text>
+					</box>
 				</box>
 				<text fg={colors.error}>{`  Error: ${error}`}</text>
 			</box>
@@ -98,7 +117,11 @@ export function HomeScreen() {
 				{LOGO.map((line, i) => (
 					<text key={i} fg={colors.accent}>{line}</text>
 				))}
-				<text fg={colors.fgDim}>{`  ${TAGLINE}`}</text>
+				<text>{""}</text>
+				<box flexDirection="row">
+					<text fg={colors.fgDim}>{`  ${TAGLINE}  `}</text>
+					<text fg={colors.accent}>{`v${version}`}</text>
+				</box>
 			</box>
 
 			{/* Row 1: Config + Spec Cache side by side */}

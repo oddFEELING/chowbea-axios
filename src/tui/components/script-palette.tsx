@@ -36,11 +36,12 @@ export function ScriptPalette({
 	const [selectedIndex, setSelectedIndex] = useState(0);
 	const { height: termHeight } = useTerminalDimensions();
 
-	// Notify parent that we have an input focused
+	// Only claim input mode when the filter has text — otherwise let
+	// app-level shortcuts (number keys, q) pass through.
 	useEffect(() => {
-		onInputFocusChange(true);
+		onInputFocusChange(filter.length > 0);
 		return () => onInputFocusChange(false);
-	}, [onInputFocusChange]);
+	}, [filter, onInputFocusChange]);
 
 	const filtered = useMemo(() => {
 		if (!filter) return scripts;
