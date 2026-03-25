@@ -15,7 +15,7 @@ import {
 import { findProjectRoot } from "./config.js";
 import type { InstanceConfig, OutputPaths } from "./config.js";
 import { GenerationError } from "./errors.js";
-import type { Logger } from "./logger.js";
+import type { Logger } from "../adapters/logger-interface.js";
 import { detectPackageManager, getDlxCommand } from "./pm.js";
 
 /**

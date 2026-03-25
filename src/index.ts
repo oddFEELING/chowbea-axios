@@ -1,6 +1,4 @@
 /**
- * chowbea-axios CLI entry point.
- * Exports the oclif run function for programmatic usage.
+ * chowbea-axios -- CLI entry point.
  */
-
-export { run } from "@oclif/core";
+export { route } from "./router.js";

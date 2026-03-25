@@ -1,0 +1,253 @@
+/**
+ * Fetch action - fetches OpenAPI spec from remote endpoint and generates types.
+ * Pure business logic extracted from the Fetch command.
+ * No oclif dependencies, no process.exit, no this.parse.
+ */
+
+import type { Logger } from "../../adapters/logger-interface.js";
+import { formatDuration } from "../../adapters/logger-interface.js";
+import {
+	ensureOutputFolders,
+	getOutputPaths,
+	loadConfig,
+	resolveSpecSource,
+} from "../config.js";
+import {
+	fetchOpenApiSpec,
+	loadLocalSpecFile,
+	saveSpec,
+} from "../fetcher.js";
+import { generate, generateClientFiles } from "../generator.js";
+import type { ClientFilesResult, DryRunResult } from "./types.js";
+
+/**
+ * Options for the fetch action.
+ */
+export interface FetchActionOptions {
+	/** Path to api.config.toml */
+	configPath?: string;
+	/** Override API endpoint URL */
+	endpoint?: string;
+	/** Use local spec file instead of fetching from remote */
+	specFile?: string;
+	/** Force regeneration even if spec hasn't changed */
+	force: boolean;
+	/** Show what would be generated without writing files */
+	dryRun: boolean;
+	/** Generate only TypeScript types (skip operations) */
+	typesOnly: boolean;
+	/** Generate only operations (skip types) */
+	operationsOnly: boolean;
+}
+
+/**
+ * Result of the fetch action.
+ */
+export interface FetchActionResult {
+	/** Whether the spec changed since last fetch */
+	specChanged: boolean;
+	/** Whether the result was loaded from cache due to network failure */
+	fromCache: boolean;
+	/** Number of operations generated */
+	operationCount: number;
+	/** Duration of the entire fetch+generate process in milliseconds */
+	durationMs: number;
+	/** Whether types were generated */
+	typesGenerated: boolean;
+	/** Whether operations were generated */
+	operationsGenerated: boolean;
+	/** Which client files were created (helpers, instance, error, client) */
+	clientFilesCreated: ClientFilesResult;
+	/** Dry run result (only present when dryRun is true) */
+	dryRunResult?: DryRunResult;
+}
+
+/**
+ * Executes the fetch action: fetch OpenAPI spec, cache it, and generate types/operations.
+ *
+ * @param options - Fetch action options (replaces CLI flags)
+ * @param logger - Logger instance for output
+ * @returns Structured result with all data the UI needs
+ */
+export async function executeFetch(
+	options: FetchActionOptions,
+	logger: Logger,
+): Promise<FetchActionResult> {
+	const startTime = Date.now();
+
+	logger.header("chowbea-axios fetch");
+
+	// Load configuration (auto-creates if missing)
+	logger.step("config", "Loading configuration...");
+	const { config, projectRoot, configPath, wasCreated } = await loadConfig(
+		options.configPath,
+	);
+
+	if (wasCreated) {
+		logger.warn(
+			{ configPath },
+			"Created default api.config.toml - please review and update settings",
+		);
+	}
+
+	// Validate flag combination early
+	if (options.typesOnly && options.operationsOnly) {
+		throw new Error("Cannot use --types-only and --operations-only together");
+	}
+
+	// Get output paths
+	const outputPaths = getOutputPaths(config, projectRoot);
+	logger.debug({ outputPaths }, "Resolved output paths");
+
+	// Ensure output folders exist (_internal, _generated)
+	await ensureOutputFolders(outputPaths);
+	logger.debug({ folder: outputPaths.folder }, "Output folders ready");
+
+	// Resolve spec source (flag > config spec_file > config api_endpoint)
+	// Note: --endpoint flag overrides spec_file for remote fetching
+	const specSource = options.endpoint
+		? { type: "remote" as const, endpoint: options.endpoint }
+		: resolveSpecSource(config, projectRoot, options.specFile);
+
+	let fetchResult;
+	let sourceIdentifier: string;
+
+	if (specSource.type === "local") {
+		// Load from local file
+		sourceIdentifier = specSource.path;
+		fetchResult = await loadLocalSpecFile({
+			localPath: specSource.path,
+			specPath: outputPaths.spec,
+			cachePath: outputPaths.cache,
+			logger,
+			force: options.force,
+		});
+	} else {
+		// Fetch from remote endpoint
+		sourceIdentifier = specSource.endpoint;
+		logger.step("fetch", "Fetching OpenAPI spec...");
+		logger.debug({ endpoint: specSource.endpoint }, "endpoint");
+
+		fetchResult = await fetchOpenApiSpec({
+			endpoint: specSource.endpoint,
+			specPath: outputPaths.spec,
+			cachePath: outputPaths.cache,
+			logger,
+			force: options.force,
+			headers: config.fetch?.headers,
+		});
+
+		// Handle network fallback
+		if (fetchResult.fromCache) {
+			logger.warn("Using cached spec due to network issues");
+		}
+	}
+
+	if (!(fetchResult.hasChanged || options.force)) {
+		logger.info("Spec unchanged, skipping generation");
+		logger.info("Use --force to regenerate anyway");
+		return {
+			specChanged: false,
+			fromCache: fetchResult.fromCache,
+			operationCount: 0,
+			durationMs: Date.now() - startTime,
+			typesGenerated: false,
+			operationsGenerated: false,
+			clientFilesCreated: { helpers: false, instance: false, error: false, client: false },
+		};
+	}
+
+	// Save the new spec
+	await saveSpec({
+		buffer: fetchResult.buffer,
+		hash: fetchResult.hash,
+		endpoint: sourceIdentifier,
+		specPath: outputPaths.spec,
+		cachePath: outputPaths.cache,
+	});
+
+	logger.info(
+		{
+			bytes: fetchResult.buffer.length,
+			hash: fetchResult.hash.slice(0, 8),
+		},
+		"Spec saved",
+	);
+
+	// Generate client files if they don't exist
+	const clientFiles = await generateClientFiles({
+		paths: outputPaths,
+		instanceConfig: config.instance,
+		logger,
+	});
+
+	// Run generation
+	logger.step("generate", "Generating types and operations...");
+	const result = await generate({
+		paths: outputPaths,
+		logger,
+		dryRun: options.dryRun,
+		skipTypes: options.operationsOnly,
+		skipOperations: options.typesOnly,
+	});
+
+	// Handle dry-run output
+	if (options.dryRun && result.dryRunResult) {
+		logger.done("Dry run complete - no files written");
+		logger.info(
+			{ operations: result.dryRunResult.operationCount },
+			"Operations found",
+		);
+		for (const file of result.dryRunResult.files) {
+			const info = file.lines > 0 ? ` (${file.lines} lines)` : " (types)";
+			logger.info(`Would ${file.action}: ${file.path}${info}`);
+		}
+		return {
+			specChanged: true,
+			fromCache: fetchResult.fromCache,
+			operationCount: result.dryRunResult.operationCount,
+			durationMs: Date.now() - startTime,
+			typesGenerated: false,
+			operationsGenerated: false,
+			clientFilesCreated: clientFiles,
+			dryRunResult: result.dryRunResult,
+		};
+	}
+
+	// Report success
+	logger.done(
+		`Completed in ${formatDuration(result.durationMs)} - ${result.operationCount} operations`,
+	);
+	if (result.typesGenerated) {
+		logger.info({ types: outputPaths.types }, "Types output");
+	}
+	if (result.operationsGenerated) {
+		logger.info(
+			{ operations: outputPaths.operations },
+			"Operations output",
+		);
+	}
+
+	if (
+		clientFiles.helpers ||
+		clientFiles.instance ||
+		clientFiles.error ||
+		clientFiles.client
+	) {
+		logger.info("Client files created:");
+		if (clientFiles.helpers) logger.info(`  - ${outputPaths.helpers}`);
+		if (clientFiles.instance) logger.info(`  - ${outputPaths.instance}`);
+		if (clientFiles.error) logger.info(`  - ${outputPaths.error}`);
+		if (clientFiles.client) logger.info(`  - ${outputPaths.client}`);
+	}
+
+	return {
+		specChanged: true,
+		fromCache: fetchResult.fromCache,
+		operationCount: result.operationCount,
+		durationMs: Date.now() - startTime,
+		typesGenerated: result.typesGenerated,
+		operationsGenerated: result.operationsGenerated,
+		clientFilesCreated: clientFiles,
+	};
+}
