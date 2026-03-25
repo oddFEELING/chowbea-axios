@@ -12,6 +12,7 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 				activeScreen: action.screen,
 				sidebarFocused: false,
 				commandPaletteOpen: false,
+				inputMode: false,
 			};
 		case "TOGGLE_SIDEBAR_FOCUS":
 			return { ...state, sidebarFocused: !state.sidebarFocused };
@@ -30,6 +31,12 @@ export function appReducer(state: AppState, action: AppAction): AppState {
 				// If just initialized, go to home; if not initialized, force init screen
 				activeScreen: action.value ? "home" : "init",
 			};
+		case "SET_INPUT_MODE":
+			return { ...state, inputMode: action.value };
+		case "OPEN_QUIT_DIALOG":
+			return { ...state, quitDialogOpen: true };
+		case "CLOSE_QUIT_DIALOG":
+			return { ...state, quitDialogOpen: false };
 		default:
 			return state;
 	}

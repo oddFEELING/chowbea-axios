@@ -69,14 +69,14 @@ const CONCURRENT_OPTIONS: Array<{ label: string; value: boolean }> = [
 	{ label: "No -- I'll run them separately", value: false },
 ];
 
-const STEP_LABELS = [
-	"API Endpoint",
-	"Output Folder",
-	"Package Manager",
-	"Auth Mode",
-	"Dev Script",
-	"Preview",
-	"Execute",
+const STEPS = [
+	{ short: "API", icon: "\u25CF" },
+	{ short: "Output", icon: "\u25CF" },
+	{ short: "PM", icon: "\u25CF" },
+	{ short: "Auth", icon: "\u25CF" },
+	{ short: "Dev", icon: "\u25CF" },
+	{ short: "Preview", icon: "\u25CF" },
+	{ short: "Run", icon: "\u25CF" },
 ];
 
 // ---------------------------------------------------------------------------
@@ -149,6 +149,15 @@ function buildReplayProvider(values: WizardValues): PromptProvider {
 // Helper: log entry rendering
 // ---------------------------------------------------------------------------
 
+const LOG_SYMBOLS: Record<string, string> = {
+	error: "\u2718",
+	warn: "\u25B2",
+	done: "\u2714",
+	step: "\u25B6",
+	debug: "\u00B7",
+	info: "\u2500",
+};
+
 function logColor(level: LogEntry["level"]): string {
 	switch (level) {
 		case "error":
@@ -166,21 +175,42 @@ function logColor(level: LogEntry["level"]): string {
 	}
 }
 
-function logPrefix(level: LogEntry["level"]): string {
-	switch (level) {
-		case "error":
-			return "x";
-		case "warn":
-			return "!";
-		case "done":
-			return "v";
-		case "step":
-			return ">";
-		case "debug":
-			return ".";
-		default:
-			return "-";
-	}
+function logSymbol(level: LogEntry["level"]): string {
+	return LOG_SYMBOLS[level] ?? "\u2500";
+}
+
+// ---------------------------------------------------------------------------
+// Helper: render the step progress indicator
+// ---------------------------------------------------------------------------
+
+function buildProgressLine(currentStep: number, phase: Phase): string {
+	return STEPS.map((s, i) => {
+		let dot: string;
+		if (i < currentStep) {
+			dot = "\u2714"; // completed checkmark
+		} else if (i === currentStep && phase === "wizard") {
+			dot = "\u25CF"; // filled dot for current
+		} else {
+			dot = "\u25CB"; // hollow dot for future
+		}
+		const label = `${dot} ${s.short}`;
+		if (i < STEPS.length - 1) {
+			return `${label} \u2500\u2500\u2500 `;
+		}
+		return label;
+	}).join("");
+}
+
+// ---------------------------------------------------------------------------
+// Helper: render TOML preview with syntax coloring per-line
+// ---------------------------------------------------------------------------
+
+function tomlLineColor(line: string): string {
+	const trimmed = line.trim();
+	if (trimmed.startsWith("[")) return colors.accent;
+	if (trimmed.startsWith("#")) return colors.fgDim;
+	if (trimmed.includes("=")) return colors.fg;
+	return colors.fgDim;
 }
 
 // ---------------------------------------------------------------------------
@@ -189,9 +219,10 @@ function logPrefix(level: LogEntry["level"]): string {
 
 interface WizardModeProps {
 	onComplete?: () => void;
+	setInputMode?: (v: boolean) => void;
 }
 
-function WizardMode({ onComplete }: WizardModeProps) {
+function WizardMode({ onComplete, setInputMode }: WizardModeProps) {
 	// Wizard state
 	const [step, setStep] = useState(0);
 	const [values, setValues] = useState<WizardValues>({
@@ -206,6 +237,13 @@ function WizardMode({ onComplete }: WizardModeProps) {
 
 	// Execution state
 	const [phase, setPhase] = useState<Phase>("wizard");
+
+	// Steps 0 and 1 have text inputs — notify parent
+	useEffect(() => {
+		const hasInput = phase === "wizard" && (step === 0 || step === 1);
+		setInputMode?.(hasInput);
+		return () => setInputMode?.(false);
+	}, [step, phase, setInputMode]);
 	const [logs, setLogs] = useState<LogEntry[]>([]);
 	const [result, setResult] = useState<InitResult | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -403,43 +441,46 @@ function WizardMode({ onComplete }: WizardModeProps) {
 	);
 
 	// -----------------------------------------------------------------------
+	// Render helpers
+	// -----------------------------------------------------------------------
+
+	const renderRadioList = <T,>(
+		options: Array<{ label: string; value: T }>,
+		currentIndex: number,
+	) =>
+		options.map((opt, i) => (
+			<text
+				key={String(opt.value)}
+				fg={i === currentIndex ? colors.accent : colors.fgDim}
+			>
+				{i === currentIndex
+					? `  \u25C9 ${opt.label}`
+					: `  \u25CB ${opt.label}`}
+			</text>
+		));
+
+	// -----------------------------------------------------------------------
 	// Render
 	// -----------------------------------------------------------------------
 
-	// Progress bar
-	const progressItems = STEP_LABELS.map((label, i) => {
-		let fg = colors.fgDim;
-		if (i < step) fg = colors.success;
-		if (i === step && phase === "wizard") fg = colors.accent;
-		return { label, fg };
-	});
-
 	return (
 		<box flexDirection="column" gap={1}>
-			<text fg={colors.accent}>Init Wizard</text>
+			{/* Header */}
+			<text fg={colors.accent}>{"  Init Wizard"}</text>
 
-			{/* Step progress */}
-			<box flexDirection="row" gap={1}>
-				{progressItems.map((item, i) => (
-					<text key={i} fg={item.fg}>
-						{i === step && phase === "wizard"
-							? `[${i + 1}. ${item.label}]`
-							: `${i + 1}. ${item.label}`}
-					</text>
-				))}
+			{/* Step progress indicator */}
+			<box flexDirection="column">
+				<text fg={colors.fgDim}>
+					{buildProgressLine(step, phase)}
+				</text>
 			</box>
 
 			{/* Step 0: API Endpoint */}
 			{phase === "wizard" && step === 0 && (
-				<box
-					border
-					borderColor={colors.borderFocus}
-					padding={1}
-					flexDirection="column"
-					gap={1}
-				>
-					<text fg={colors.fgBright}>
-						Enter your OpenAPI spec endpoint URL:
+				<box flexDirection="column" gap={1} paddingX={1}>
+					<text fg={colors.accent}>{"API Endpoint"}</text>
+					<text fg={colors.fgDim}>
+						{"Enter the URL to your OpenAPI spec (JSON or YAML)"}
 					</text>
 					<input
 						placeholder={DEFAULT_CONFIG.api_endpoint}
@@ -448,25 +489,16 @@ function WizardMode({ onComplete }: WizardModeProps) {
 						onSubmit={handleEndpointSubmit}
 						focused={true}
 					/>
-					<box flexDirection="row">
-						<text fg={colors.fgDim}>{"Press "}</text>
-						<text fg={colors.accent}>{"Enter"}</text>
-						<text fg={colors.fgDim}>{" to continue"}</text>
-					</box>
+					<text fg={colors.fgDim}>{"Enter continue"}</text>
 				</box>
 			)}
 
 			{/* Step 1: Output Folder */}
 			{phase === "wizard" && step === 1 && (
-				<box
-					border
-					borderColor={colors.borderFocus}
-					padding={1}
-					flexDirection="column"
-					gap={1}
-				>
-					<text fg={colors.fgBright}>
-						Where should generated API files be placed?
+				<box flexDirection="column" gap={1} paddingX={1}>
+					<text fg={colors.accent}>{"Output Folder"}</text>
+					<text fg={colors.fgDim}>
+						{"Where should generated API files be placed?"}
 					</text>
 					<input
 						placeholder={DEFAULT_CONFIG.output.folder}
@@ -475,226 +507,110 @@ function WizardMode({ onComplete }: WizardModeProps) {
 						onSubmit={handleOutputSubmit}
 						focused={true}
 					/>
-					<box flexDirection="row">
-						<text fg={colors.fgDim}>{"Press "}</text>
-						<text fg={colors.accent}>{"Enter"}</text>
-						<text fg={colors.fgDim}>{" to continue, "}</text>
-						<text fg={colors.accent}>{"Esc"}</text>
-						<text fg={colors.fgDim}>{" to go back"}</text>
-					</box>
+					<text fg={colors.fgDim}>{"Enter continue | Esc back"}</text>
 				</box>
 			)}
 
 			{/* Step 2: Package Manager */}
 			{phase === "wizard" && step === 2 && (
-				<box
-					border
-					borderColor={colors.borderFocus}
-					padding={1}
-					flexDirection="column"
-					gap={1}
-				>
-					<text fg={colors.fgBright}>
-						Which package manager are you using?
+				<box flexDirection="column" gap={1} paddingX={1}>
+					<text fg={colors.accent}>{"Package Manager"}</text>
+					<text fg={colors.fgDim}>
+						{"Which package manager does this project use?"}
 					</text>
-					{PM_OPTIONS.map((opt, i) => (
-						<text
-							key={opt.value}
-							fg={
-								i === selectedIndex
-									? colors.accent
-									: colors.fgDim
-							}
-						>
-							{i === selectedIndex
-								? `> ${opt.label}`
-								: `  ${opt.label}`}
-						</text>
-					))}
-					<box flexDirection="row">
-						<text fg={colors.fgDim}>{"Use "}</text>
-						<text fg={colors.accent}>{"up/down"}</text>
-						<text fg={colors.fgDim}>{" to navigate, "}</text>
-						<text fg={colors.accent}>{"Enter"}</text>
-						<text fg={colors.fgDim}>{" to select, "}</text>
-						<text fg={colors.accent}>{"Esc"}</text>
-						<text fg={colors.fgDim}>{" to go back"}</text>
+					<box flexDirection="column">
+						{renderRadioList(PM_OPTIONS, selectedIndex)}
 					</box>
+					<text fg={colors.fgDim}>{"Up/Down navigate | Enter select | Esc back"}</text>
 				</box>
 			)}
 
 			{/* Step 3: Auth Mode */}
 			{phase === "wizard" && step === 3 && (
-				<box
-					border
-					borderColor={colors.borderFocus}
-					padding={1}
-					flexDirection="column"
-					gap={1}
-				>
-					<text fg={colors.fgBright}>
-						How should auth tokens be attached to requests?
+				<box flexDirection="column" gap={1} paddingX={1}>
+					<text fg={colors.accent}>{"Auth Mode"}</text>
+					<text fg={colors.fgDim}>
+						{"How should auth tokens be attached to requests?"}
 					</text>
-					{AUTH_OPTIONS.map((opt, i) => (
-						<text
-							key={opt.value}
-							fg={
-								i === selectedIndex
-									? colors.accent
-									: colors.fgDim
-							}
-						>
-							{i === selectedIndex
-								? `> ${opt.label}`
-								: `  ${opt.label}`}
-						</text>
-					))}
-					<box flexDirection="row">
-						<text fg={colors.fgDim}>{"Use "}</text>
-						<text fg={colors.accent}>{"up/down"}</text>
-						<text fg={colors.fgDim}>{" to navigate, "}</text>
-						<text fg={colors.accent}>{"Enter"}</text>
-						<text fg={colors.fgDim}>{" to select, "}</text>
-						<text fg={colors.accent}>{"Esc"}</text>
-						<text fg={colors.fgDim}>{" to go back"}</text>
+					<box flexDirection="column">
+						{renderRadioList(AUTH_OPTIONS, selectedIndex)}
 					</box>
+					<text fg={colors.fgDim}>{"Up/Down navigate | Enter select | Esc back"}</text>
 				</box>
 			)}
 
 			{/* Step 4: Concurrent Dev Script */}
 			{phase === "wizard" && step === 4 && (
-				<box
-					border
-					borderColor={colors.borderFocus}
-					padding={1}
-					flexDirection="column"
-					gap={1}
-				>
-					<text fg={colors.fgBright}>
-						Merge api:watch with your dev script?
-					</text>
+				<box flexDirection="column" gap={1} paddingX={1}>
+					<text fg={colors.accent}>{"Dev Script"}</text>
 					<text fg={colors.fgDim}>
-						This creates a single command that runs both api:watch and your dev server together.
+						{"Merge api:watch with your dev script into a single command?"}
 					</text>
-					{CONCURRENT_OPTIONS.map((opt, i) => (
-						<text
-							key={String(opt.value)}
-							fg={
-								i === selectedIndex
-									? colors.accent
-									: colors.fgDim
-							}
-						>
-							{i === selectedIndex
-								? `> ${opt.label}`
-								: `  ${opt.label}`}
-						</text>
-					))}
-					<box flexDirection="row">
-						<text fg={colors.fgDim}>{"Use "}</text>
-						<text fg={colors.accent}>{"up/down"}</text>
-						<text fg={colors.fgDim}>{" to navigate, "}</text>
-						<text fg={colors.accent}>{"Enter"}</text>
-						<text fg={colors.fgDim}>{" to select, "}</text>
-						<text fg={colors.accent}>{"Esc"}</text>
-						<text fg={colors.fgDim}>{" to go back"}</text>
+					<box flexDirection="column">
+						{renderRadioList(CONCURRENT_OPTIONS, selectedIndex)}
 					</box>
+					<text fg={colors.fgDim}>{"Up/Down navigate | Enter select | Esc back"}</text>
 				</box>
 			)}
 
 			{/* Step 5: Preview */}
 			{phase === "wizard" && step === 5 && (
-				<box
-					border
-					borderColor={colors.borderFocus}
-					padding={1}
-					flexDirection="column"
-					gap={1}
-				>
-					<text fg={colors.fgBright}>
-						Config Preview (api.config.toml)
+				<box flexDirection="column" gap={1} paddingX={1}>
+					<text fg={colors.accent}>{"Config Preview"}</text>
+					<text fg={colors.fgDim}>
+						{"api.config.toml"}
 					</text>
 					<box
-						border
-						borderColor={colors.border}
-						padding={1}
 						flexDirection="column"
+						backgroundColor={colors.bgHighlight}
+						paddingX={1}
 					>
 						{buildPreviewConfig(values)
 							.split("\n")
 							.map((line, i) => (
-								<text key={i} fg={colors.fg}>
-									{line}
+								<text key={i} fg={tomlLineColor(line)}>
+									{line || " "}
 								</text>
 							))}
 					</box>
-					<box flexDirection="row">
-						<text fg={colors.fgDim}>{"Press "}</text>
-						<text fg={colors.accent}>{"Enter"}</text>
-						<text fg={colors.fgDim}>{" to confirm and proceed, "}</text>
-						<text fg={colors.accent}>{"Esc"}</text>
-						<text fg={colors.fgDim}>{" to go back"}</text>
-					</box>
+					<text fg={colors.fgDim}>{"Enter confirm | Esc back"}</text>
 				</box>
 			)}
 
 			{/* Step 6: Execute (pre-run) */}
 			{phase === "wizard" && step === 6 && (
-				<box
-					border
-					borderColor={colors.borderFocus}
-					padding={1}
-					flexDirection="column"
-					gap={1}
-				>
-					<text fg={colors.fgBright}>Ready to initialize</text>
-					<box flexDirection="row">
-						<text fg={colors.fgDim}>{"Endpoint:    "}</text>
-						<text fg={colors.info}>{values.endpoint}</text>
+				<box flexDirection="column" gap={1} paddingX={1}>
+					<text fg={colors.accent}>{"Ready to Initialize"}</text>
+					<text fg={colors.fgDim}>
+						{"Review your settings and press Enter to run."}
+					</text>
+					<box
+						flexDirection="column"
+						backgroundColor={colors.bgSurface}
+						paddingX={2}
+						paddingY={1}
+					>
+						<text fg={colors.fg}>{`  Endpoint      ${values.endpoint}`}</text>
+						<text fg={colors.fg}>{`  Output        ${values.outputFolder}`}</text>
+						<text fg={colors.fg}>{`  PM            ${values.pm}`}</text>
+						<text fg={colors.fg}>{`  Auth          ${values.authMode}`}</text>
+						<text fg={colors.fg}>{`  Dev script    ${values.wantsConcurrent ? `yes (${values.concurrentName})` : "no"}`}</text>
 					</box>
-					<box flexDirection="row">
-						<text fg={colors.fgDim}>{"Output:      "}</text>
-						<text fg={colors.info}>{values.outputFolder}</text>
-					</box>
-					<box flexDirection="row">
-						<text fg={colors.fgDim}>{"PM:          "}</text>
-						<text fg={colors.info}>{values.pm}</text>
-					</box>
-					<box flexDirection="row">
-						<text fg={colors.fgDim}>{"Auth:        "}</text>
-						<text fg={colors.info}>{values.authMode}</text>
-					</box>
-					<box flexDirection="row">
-						<text fg={colors.fgDim}>{"Dev script:  "}</text>
-						<text fg={colors.info}>{values.wantsConcurrent ? `yes (${values.concurrentName})` : "no"}</text>
-					</box>
-					<box flexDirection="row">
-						<text fg={colors.fgDim}>{"Press "}</text>
-						<text fg={colors.accent}>{"Enter"}</text>
-						<text fg={colors.fgDim}>{" to run init, "}</text>
-						<text fg={colors.accent}>{"Esc"}</text>
-						<text fg={colors.fgDim}>{" to go back"}</text>
-					</box>
+					<text fg={colors.fgDim}>{"Enter run init | Esc back"}</text>
 				</box>
 			)}
 
 			{/* Executing: live logs */}
 			{phase === "executing" && (
-				<box
-					border
-					borderColor={colors.info}
-					padding={1}
-					flexDirection="column"
-					gap={1}
-				>
-					<text fg={colors.info}>Initializing...</text>
+				<box flexDirection="column" gap={1} paddingX={1}>
+					<text fg={colors.info}>{"\u25CF Initializing..."}</text>
 					{logs.length > 0 && (
 						<scrollbox focused={true} maxHeight={16}>
 							{logs.map((entry, i) => (
 								<text
 									key={i}
 									fg={logColor(entry.level)}
-								>{`${logPrefix(entry.level)} ${entry.message}`}</text>
+								>{`  ${logSymbol(entry.level)} ${entry.message}`}</text>
 							))}
 						</scrollbox>
 					)}
@@ -703,85 +619,43 @@ function WizardMode({ onComplete }: WizardModeProps) {
 
 			{/* Done: result summary */}
 			{phase === "done" && result && (
-				<box
-					border
-					borderColor={colors.success}
-					padding={1}
-					flexDirection="column"
-					gap={1}
-				>
-					<text fg={colors.success}>Init Complete</text>
-					<box flexDirection="row">
-						<text fg={colors.fgDim}>{"Config created:  "}</text>
-						<text
-							fg={
-								result.configCreated
-									? colors.success
-									: colors.fgDim
-							}
-						>
-							{result.configCreated ? "yes" : "no"}
+				<box flexDirection="column" gap={1} paddingX={1}>
+					<text fg={colors.success}>{"\u2714 Init Complete"}</text>
+					<box
+						flexDirection="column"
+						backgroundColor={colors.bgSurface}
+						paddingX={2}
+						paddingY={1}
+					>
+						<text fg={result.configCreated ? colors.success : colors.fgDim}>
+							{`  ${result.configCreated ? "\u2714" : "\u2500"} Config created`}
 						</text>
-					</box>
-					<box flexDirection="row">
-						<text fg={colors.fgDim}>{"Axios installed: "}</text>
-						<text
-							fg={
-								result.axiosInstalled
-									? colors.success
-									: colors.fgDim
-							}
-						>
-							{result.axiosInstalled ? "yes" : "already present"}
+						<text fg={result.axiosInstalled ? colors.success : colors.fgDim}>
+							{`  ${result.axiosInstalled ? "\u2714" : "\u2500"} Axios ${result.axiosInstalled ? "installed" : "already present"}`}
 						</text>
-					</box>
-					<box flexDirection="row">
-						<text fg={colors.fgDim}>{"Scripts added:   "}</text>
-						<text fg={colors.fg}>
-							{result.scriptsAdded.length > 0
-								? result.scriptsAdded.join(", ")
-								: "none"}
+						<text fg={result.scriptsAdded.length > 0 ? colors.success : colors.fgDim}>
+							{`  ${result.scriptsAdded.length > 0 ? "\u2714" : "\u2500"} Scripts: ${result.scriptsAdded.length > 0 ? result.scriptsAdded.join(", ") : "none"}`}
 						</text>
-					</box>
-					<box flexDirection="row">
-						<text fg={colors.fgDim}>{"Client files:    "}</text>
-						<text
-							fg={
-								result.clientFilesCreated.instance
-									? colors.success
-									: colors.fgDim
-							}
-						>
-							{[
-								result.clientFilesCreated.helpers &&
-									"helpers",
-								result.clientFilesCreated.instance &&
-									"instance",
+						<text fg={result.clientFilesCreated.instance ? colors.success : colors.fgDim}>
+							{`  ${result.clientFilesCreated.instance ? "\u2714" : "\u2500"} Client files: ${[
+								result.clientFilesCreated.helpers && "helpers",
+								result.clientFilesCreated.instance && "instance",
 								result.clientFilesCreated.error && "error",
-								result.clientFilesCreated.client &&
-									"client",
-							]
-								.filter(Boolean)
-								.join(", ") || "already exist"}
+								result.clientFilesCreated.client && "client",
+							].filter(Boolean).join(", ") || "already exist"}`}
 						</text>
 					</box>
 
 					{/* Show logs */}
 					{logs.length > 0 && (
-						<box
-							border
-							borderColor={colors.border}
-							padding={1}
-							flexDirection="column"
-							maxHeight={12}
-						>
-							<text fg={colors.fgBright}>Log Output</text>
+						<box flexDirection="column" maxHeight={12}>
+							<text fg={colors.fgDim}>{"Log Output"}</text>
 							<scrollbox focused={false}>
 								{logs.map((entry, i) => (
 									<text
 										key={i}
 										fg={logColor(entry.level)}
-									>{`${logPrefix(entry.level)} ${entry.message}`}</text>
+									>{`  ${logSymbol(entry.level)} ${entry.message}`}</text>
 								))}
 							</scrollbox>
 						</box>
@@ -791,31 +665,19 @@ function WizardMode({ onComplete }: WizardModeProps) {
 
 			{/* Error */}
 			{phase === "error" && error && (
-				<box
-					border
-					borderColor={colors.error}
-					padding={1}
-					flexDirection="column"
-					gap={1}
-				>
-					<text fg={colors.error}>Error</text>
-					<text fg={colors.error}>{error}</text>
+				<box flexDirection="column" gap={1} paddingX={1}>
+					<text fg={colors.error}>{"\u2718 Error"}</text>
+					<text fg={colors.error}>{`  ${error}`}</text>
 
 					{logs.length > 0 && (
-						<box
-							border
-							borderColor={colors.border}
-							padding={1}
-							flexDirection="column"
-							maxHeight={12}
-						>
-							<text fg={colors.fgBright}>Log Output</text>
+						<box flexDirection="column" maxHeight={12}>
+							<text fg={colors.fgDim}>{"Log Output"}</text>
 							<scrollbox focused={false}>
 								{logs.map((entry, i) => (
 									<text
 										key={i}
 										fg={logColor(entry.level)}
-									>{`${logPrefix(entry.level)} ${entry.message}`}</text>
+									>{`  ${logSymbol(entry.level)} ${entry.message}`}</text>
 								))}
 							</scrollbox>
 						</box>
@@ -853,10 +715,10 @@ const FIELDS: FieldDef[] = [
 	{ key: "watch.debug", label: "debug", section: "Watch", type: "boolean" },
 ];
 
-const ACTION_LABELS = [
-	"[R] Regenerate client files",
-	"[S] Update package.json scripts",
-	"[C] Setup concurrent dev script",
+const ACTIONS = [
+	{ key: "R", label: "Regenerate client files" },
+	{ key: "S", label: "Update package.json scripts" },
+	{ key: "C", label: "Setup concurrent dev script" },
 ];
 
 function getNestedValue(obj: Record<string, unknown>, dotPath: string): unknown {
@@ -877,7 +739,7 @@ function setNestedValue(obj: Record<string, unknown>, dotPath: string, value: un
 	return clone;
 }
 
-function SettingsMode() {
+function SettingsMode({ setInputMode }: { setInputMode?: (v: boolean) => void }) {
 	const [config, setConfig] = useState<ApiConfig | null>(null);
 	const [configPath, setConfigPath] = useState("");
 	const [selectedRow, setSelectedRow] = useState(0);
@@ -888,6 +750,12 @@ function SettingsMode() {
 	const [statusMsg, setStatusMsg] = useState<string | null>(null);
 	const [loading, setLoading] = useState(true);
 	const [error, setError] = useState<string | null>(null);
+
+	// Notify parent when editing a field
+	useEffect(() => {
+		setInputMode?.(editingField !== null);
+		return () => setInputMode?.(false);
+	}, [editingField, setInputMode]);
 
 	// Load config on mount
 	useEffect(() => {
@@ -993,7 +861,7 @@ function SettingsMode() {
 			if (section === "config") {
 				setSelectedRow((prev) => (prev > 0 ? prev - 1 : FIELDS.length - 1));
 			} else {
-				setActionIndex((prev) => (prev > 0 ? prev - 1 : ACTION_LABELS.length - 1));
+				setActionIndex((prev) => (prev > 0 ? prev - 1 : ACTIONS.length - 1));
 			}
 			return;
 		}
@@ -1002,7 +870,7 @@ function SettingsMode() {
 			if (section === "config") {
 				setSelectedRow((prev) => (prev < FIELDS.length - 1 ? prev + 1 : 0));
 			} else {
-				setActionIndex((prev) => (prev < ACTION_LABELS.length - 1 ? prev + 1 : 0));
+				setActionIndex((prev) => (prev < ACTIONS.length - 1 ? prev + 1 : 0));
 			}
 			return;
 		}
@@ -1084,97 +952,118 @@ function SettingsMode() {
 	// -----------------------------------------------------------------------
 
 	if (loading) {
-		return <text fg={colors.fgDim}>Loading settings...</text>;
+		return <text fg={colors.fgDim}>{"Loading settings..."}</text>;
 	}
 
 	if (error) {
 		return (
 			<box flexDirection="column" gap={1}>
-				<text fg={colors.error}>Failed to load config</text>
+				<text fg={colors.error}>{"\u2718 Failed to load config"}</text>
 				<text fg={colors.error}>{error}</text>
 			</box>
 		);
 	}
 
 	if (config == null) {
-		return <text fg={colors.fgDim}>No configuration found.</text>;
+		return <text fg={colors.fgDim}>{"No configuration found."}</text>;
 	}
 
 	// Group fields by section for rendering
 	let prevSection = "";
+
 	const fieldRows = FIELDS.map((field, fieldIndex) => {
 		const isSelected = selectedRow === fieldIndex && section === "config";
 		const isEditing = editingField === field.key;
 		const value = getNestedValue(config as unknown as Record<string, unknown>, field.key);
-		const displayValue = value === undefined || value === "" ? "-" : String(value);
+		const displayValue = value === undefined || value === "" ? "\u2014" : String(value);
 
 		const showHeader = field.section !== prevSection;
 		prevSection = field.section;
 
+		// Build the indicator for the field type
+		let typeHint = "";
+		if (field.type === "boolean") {
+			typeHint = value ? " \u2714" : " \u2718";
+		} else if (field.type === "enum") {
+			typeHint = " \u25BE"; // dropdown indicator
+		}
+
+		const pointer = isSelected ? "\u25B8 " : "  ";
+		const labelText = field.label.padEnd(16);
+
 		return (
-			<box key={field.key} flexDirection="column">
+			<box key={field.key} flexDirection="column" paddingTop={showHeader && fieldIndex > 0 ? 1 : 0}>
 				{showHeader && (
-					<text fg={colors.accent}>{`  ${field.section}`}</text>
+					<text fg={colors.accentAlt}>{`  \u2500\u2500 ${field.section} \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500`}</text>
 				)}
-				<box flexDirection="row" height={1}>
-					<text fg={isSelected ? colors.accent : colors.fgDim}>
-						{isSelected ? "> " : "  "}
+				{!isEditing && (
+					<text fg={isSelected ? colors.fgBright : colors.fg}>
+						{`${pointer}${labelText}${displayValue}${typeHint}`}
 					</text>
-					<text fg={colors.fgDim}>
-						{`  ${field.label.padEnd(16)}`}
-					</text>
-					{isEditing ? (
+				)}
+				{isEditing && (
+					<box flexDirection="column">
+						<text fg={colors.accent}>
+							{`${pointer}${labelText}`}
+						</text>
 						<input
 							focused
 							value={editDraft}
 							onInput={setEditDraft}
 							placeholder={displayValue}
 						/>
-					) : (
-						<text fg={isSelected ? colors.fgBright : colors.fg}>
-							{displayValue}
-						</text>
-					)}
-				</box>
+					</box>
+				)}
 			</box>
 		);
 	});
 
 	return (
 		<box flexDirection="column" flexGrow={1} gap={1}>
-			<text fg={colors.accent}>Settings</text>
+			{/* Header */}
+			<text fg={colors.accent}>{"  Settings"}</text>
+			<text fg={colors.fgDim}>{`  ${configPath}`}</text>
 
 			{/* Config fields */}
-			<box border borderColor={section === "config" ? colors.borderFocus : colors.border} paddingX={1} flexDirection="column">
+			<box
+				border
+				borderColor={section === "config" ? colors.borderFocus : colors.border}
+				paddingX={1}
+				flexDirection="column"
+			>
 				{fieldRows}
 			</box>
 
 			{/* Quick Actions */}
-			<box border borderColor={section === "actions" ? colors.borderFocus : colors.border} paddingX={1} flexDirection="column">
-				<text fg={colors.fgBright}>Quick Actions</text>
-				{ACTION_LABELS.map((label, i) => (
-					<text
-						key={label}
-						fg={section === "actions" && actionIndex === i ? colors.accent : colors.fgDim}
-					>
-						{section === "actions" && actionIndex === i ? `> ${label}` : `  ${label}`}
-					</text>
-				))}
+			<box
+				border
+				borderColor={section === "actions" ? colors.borderFocus : colors.border}
+				paddingX={1}
+				flexDirection="column"
+				gap={0}
+			>
+				<text fg={colors.fgDim}>{"Actions"}</text>
+				{ACTIONS.map((action, i) => {
+					const isSel = section === "actions" && actionIndex === i;
+					return (
+						<text
+							key={action.key}
+							fg={isSel ? colors.accent : colors.fg}
+						>
+							{isSel
+								? `  \u25B8 [${action.key}] ${action.label}`
+								: `    [${action.key}] ${action.label}`}
+						</text>
+					);
+				})}
 			</box>
 
 			{/* Navigation hints */}
-			<box flexDirection="row">
-				<text fg={colors.fgDim}>{"Tab"}</text>
-				<text fg={colors.fgDim}>{": switch section  "}</text>
-				<text fg={colors.fgDim}>{"Up/Down"}</text>
-				<text fg={colors.fgDim}>{": navigate  "}</text>
-				<text fg={colors.fgDim}>{"Enter"}</text>
-				<text fg={colors.fgDim}>{": edit/toggle"}</text>
-			</box>
+			<text fg={colors.fgDim}>{"  Tab switch | Up/Down navigate | Enter edit/toggle | Esc cancel"}</text>
 
 			{/* Status message */}
 			{statusMsg != null && (
-				<text fg={colors.success}>{statusMsg}</text>
+				<text fg={colors.success}>{`  ${statusMsg}`}</text>
 			)}
 		</box>
 	);
@@ -1186,9 +1075,10 @@ function SettingsMode() {
 
 interface InitScreenProps {
 	onComplete?: () => void;
+	setInputMode?: (v: boolean) => void;
 }
 
-export function InitScreen({ onComplete }: InitScreenProps) {
+export function InitScreen({ onComplete, setInputMode }: InitScreenProps) {
 	const [initialized, setInitialized] = useState<boolean | null>(null);
 
 	useEffect(() => {
@@ -1200,7 +1090,7 @@ export function InitScreen({ onComplete }: InitScreenProps) {
 	}, []);
 
 	if (initialized === null) {
-		return <text fg={colors.fgDim}>Checking setup...</text>;
+		return <text fg={colors.fgDim}>{"Checking setup..."}</text>;
 	}
 
 	if (!initialized) {
@@ -1210,9 +1100,10 @@ export function InitScreen({ onComplete }: InitScreenProps) {
 					setInitialized(true);
 					onComplete?.();
 				}}
+				setInputMode={setInputMode}
 			/>
 		);
 	}
 
-	return <SettingsMode />;
+	return <SettingsMode setInputMode={setInputMode} />;
 }

@@ -253,7 +253,7 @@ function renderSchemaTable(
 // Component
 // ---------------------------------------------------------------------------
 
-export function EndpointInspectorScreen() {
+export function EndpointInspectorScreen({ setInputMode }: { setInputMode?: (v: boolean) => void }) {
 	const [endpoints, setEndpoints] = useState<EndpointDetail[]>([]);
 	const [searchQuery, setSearchQuery] = useState("");
 	const [selectedIndex, setSelectedIndex] = useState(0);
@@ -265,6 +265,12 @@ export function EndpointInspectorScreen() {
 		title: string;
 		version: string;
 	} | null>(null);
+
+	// Notify parent when search input is focused
+	useEffect(() => {
+		setInputMode?.(focusPanel === "search");
+		return () => setInputMode?.(false);
+	}, [focusPanel, setInputMode]);
 
 	// Terminal height for dynamic visible rows
 	const { height: termHeight } = useTerminalDimensions();

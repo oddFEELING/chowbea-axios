@@ -24,9 +24,9 @@ const SCREEN_DESCRIPTIONS: Record<ScreenId, string> = {
 	fetch: "Fetch & generate",
 	diff: "View API diffs",
 	validate: "Schema validation",
-	watch: "Watch for changes",
 	process: "Running processes",
 	inspect: "Browse API endpoints",
+	env: "Manage .env files",
 };
 
 function buildPaletteItems(onQuit: () => void): PaletteItem[] {

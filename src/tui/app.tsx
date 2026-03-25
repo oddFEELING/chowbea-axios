@@ -2,6 +2,7 @@ import { useReducer, useCallback, useEffect } from "react";
 import { useKeyboard, useRenderer } from "@opentui/react";
 import { Shell } from "./components/shell.js";
 import { CommandPalette } from "./components/command-palette.js";
+import { QuitDialog } from "./components/quit-dialog.js";
 import { appReducer } from "./state/reducer.js";
 import { initialState, type ScreenId } from "./state/types.js";
 import { SCREENS } from "./components/sidebar.js";
@@ -9,11 +10,12 @@ import { HomeScreen } from "./screens/home.js";
 import { FetchGenerateScreen } from "./screens/fetch-generate.js";
 import { DiffViewerScreen } from "./screens/diff-viewer.js";
 import { ValidationScreen } from "./screens/validation.js";
-import { WatchModeScreen } from "./screens/watch-mode.js";
 import { InitScreen } from "./screens/init-wizard.js";
 import { ProcessScreen } from "./screens/process-runner.js";
 import { EndpointInspectorScreen } from "./screens/endpoint-inspector.js";
+import { EnvManagerScreen } from "./screens/env-manager.js";
 import { configExists, findProjectRoot, getConfigPath } from "../core/config.js";
+import { processManager } from "./services/process-manager.js";
 
 export function App() {
 	const [state, dispatch] = useReducer(appReducer, initialState);
@@ -41,7 +43,19 @@ export function App() {
 		dispatch({ type: "SET_INITIALIZED", value: true });
 	}, []);
 
+	const setInputMode = useCallback((value: boolean) => {
+		dispatch({ type: "SET_INPUT_MODE", value });
+	}, []);
+
+	const doQuit = useCallback(() => {
+		processManager.killAll();
+		renderer.destroy();
+	}, [renderer]);
+
 	useKeyboard((key) => {
+		// When quit dialog is open, let it handle everything
+		if (state.quitDialogOpen) return;
+
 		// Ctrl+P to toggle command palette — always global
 		if (key.name === "p" && key.ctrl) {
 			dispatch({ type: "TOGGLE_COMMAND_PALETTE" });
@@ -57,11 +71,10 @@ export function App() {
 			return;
 		}
 
-		// Below here: only when sidebar is focused, so screens can
-		// use number keys, 'q', etc. in their inputs without conflict.
-		if (!state.sidebarFocused) return;
+		// Skip navigation shortcuts when a screen is in input mode
+		if (state.inputMode) return;
 
-		// Number keys for direct screen navigation
+		// Number keys for direct screen navigation — always global
 		const screenIndex = parseInt(key.name ?? "", 10);
 		if (screenIndex >= 1 && screenIndex <= SCREENS.length) {
 			const screen = SCREENS[screenIndex - 1];
@@ -69,9 +82,10 @@ export function App() {
 			return;
 		}
 
-		// q to quit
+		// q to open quit dialog — works from anywhere (except input mode)
 		if (key.name === "q" && !key.ctrl) {
-			renderer.destroy();
+			dispatch({ type: "OPEN_QUIT_DIALOG" });
+			return;
 		}
 	});
 
@@ -83,26 +97,26 @@ export function App() {
 
 		// Not initialized — force init screen
 		if (!state.initialized) {
-			return <InitScreen onComplete={handleInitComplete} />;
+			return <InitScreen onComplete={handleInitComplete} setInputMode={setInputMode} />;
 		}
 
 		switch (state.activeScreen) {
 			case "home":
 				return <HomeScreen />;
 			case "init":
-				return <InitScreen onComplete={handleInitComplete} />;
+				return <InitScreen onComplete={handleInitComplete} setInputMode={setInputMode} />;
 			case "fetch":
 				return <FetchGenerateScreen />;
 			case "diff":
 				return <DiffViewerScreen />;
 			case "validate":
 				return <ValidationScreen />;
-			case "watch":
-				return <WatchModeScreen />;
 			case "process":
-				return <ProcessScreen />;
+				return <ProcessScreen setInputMode={setInputMode} />;
 			case "inspect":
-				return <EndpointInspectorScreen />;
+				return <EndpointInspectorScreen setInputMode={setInputMode} />;
+			case "env":
+				return <EnvManagerScreen setInputMode={setInputMode} />;
 		}
 	};
 
@@ -118,9 +132,9 @@ export function App() {
 		dispatch({ type: "CLOSE_COMMAND_PALETTE" });
 	}, []);
 
-	const handleQuit = useCallback(() => {
-		renderer.destroy();
-	}, [renderer]);
+	const handleQuitCancel = useCallback(() => {
+		dispatch({ type: "CLOSE_QUIT_DIALOG" });
+	}, []);
 
 	return (
 		<Shell
@@ -129,11 +143,13 @@ export function App() {
 			onNavigate={navigate}
 			locked={!state.initialized}
 		>
-			{state.commandPaletteOpen ? (
+			{state.quitDialogOpen ? (
+				<QuitDialog onConfirm={doQuit} onCancel={handleQuitCancel} />
+			) : state.commandPaletteOpen ? (
 				<CommandPalette
 					onSelect={handlePaletteSelect}
 					onClose={handlePaletteClose}
-					onQuit={handleQuit}
+					onQuit={doQuit}
 				/>
 			) : (
 				renderScreen()

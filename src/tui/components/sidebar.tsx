@@ -3,15 +3,15 @@ import { colors } from "../theme/colors.js";
 
 export type SidebarMode = "full" | "compact" | "hidden";
 
-const SCREENS: Array<{ id: ScreenId; label: string; key: string }> = [
+const SCREENS: Array<{ id: ScreenId; label: string; altLabel?: string; key: string }> = [
 	{ id: "home", label: "Home", key: "1" },
-	{ id: "init", label: "Init", key: "2" },
+	{ id: "init", label: "Init", altLabel: "Config", key: "2" },
 	{ id: "fetch", label: "Fetch", key: "3" },
 	{ id: "diff", label: "Diff", key: "4" },
 	{ id: "validate", label: "Validate", key: "5" },
-	{ id: "watch", label: "Watch", key: "6" },
-	{ id: "process", label: "Processes", key: "7" },
-	{ id: "inspect", label: "Inspect", key: "8" },
+	{ id: "process", label: "Processes", key: "6" },
+	{ id: "inspect", label: "Inspect", key: "7" },
+	{ id: "env", label: "Env", key: "8" },
 ];
 
 interface SidebarProps {
@@ -78,11 +78,12 @@ export function Sidebar({
 				const isDisabled = locked && screen.id !== "init";
 				const fg = isDisabled ? colors.fgDim : isActive ? colors.accent : colors.fg;
 				const suffix = isDisabled ? " \u00d7" : isActive ? " \u2190" : "";
+				const label = !locked && screen.altLabel ? screen.altLabel : screen.label;
 				return (
 					<text
 						key={screen.id}
 						fg={fg}
-						content={`${screen.key}. ${screen.label}${suffix}`}
+						content={`${screen.key}. ${label}${suffix}`}
 					/>
 				);
 			})}
