@@ -11,7 +11,7 @@ import { parseArgs } from "node:util";
 import { createLogger } from "../adapters/headless-logger.js";
 import { getLogLevel } from "../adapters/logger-interface.js";
 import { formatError } from "../core/errors.js";
-import { formatStatusOutput, formatDiffSummary } from "./formatters.js";
+import { formatStatusOutput, formatDiffSummary, formatPluginsList } from "./formatters.js";
 
 // ---- Core actions ----------------------------------------------------------
 import { executeFetch } from "../core/actions/fetch.js";
@@ -24,9 +24,11 @@ import { executeValidate } from "../core/actions/validate.js";
 import { executeWatch } from "../core/actions/watch.js";
 import {
 	executeInit,
+	setupVitePlugins,
 	type PromptProvider,
 	type InitActionOptions,
 } from "../core/actions/init.js";
+import { executePluginsScan, scaffoldNewSurface, scaffoldNewPanel, type PluginsActionOptions } from "../core/actions/plugins.js";
 import type { AuthMode } from "../core/config.js";
 import { DEFAULT_INSTANCE_CONFIG } from "../core/config.js";
 
@@ -39,6 +41,7 @@ const COMMANDS = [
 	"validate",
 	"watch",
 	"init",
+	"plugins",
 ] as const;
 
 type CommandName = (typeof COMMANDS)[number];
@@ -60,6 +63,7 @@ function printHelp(): void {
     validate     Validate the OpenAPI spec
     watch        Watch for spec changes and auto-regenerate
     init         Initialize chowbea-axios in your project
+    plugins      Manage Vite codegen plugins (Surfaces & Side Panels)
 
   ${"\x1b[1m"}GLOBAL FLAGS${"\x1b[0m"}
     -q, --quiet      Suppress non-error output
@@ -144,6 +148,8 @@ function printCommandHelp(command: CommandName): void {
         --skip-scripts       Skip adding npm scripts
         --skip-client        Skip generating client files
         --skip-concurrent    Skip concurrent script setup
+        --skip-workflow      Skip GitHub Actions workflow setup
+        --with-vite-plugins  Scaffold Vite codegen plugins (Surfaces & Side Panels)
         --base-url-env <var> Environment variable for base URL
         --env-accessor <str> How to access env vars (e.g. "process.env")
         --token-key <key>    localStorage key for auth token
@@ -152,6 +158,19 @@ function printCommandHelp(command: CommandName): void {
         --timeout <ms>       Request timeout in milliseconds
     -q, --quiet              Suppress non-error output
     -v, --verbose            Show detailed output
+`,
+		plugins: `
+  ${"\x1b[1m"}chowbea-axios plugins${"\x1b[0m"} - Manage Vite codegen plugins (Surfaces & Side Panels)
+
+  ${"\x1b[1m"}FLAGS${"\x1b[0m"}
+      --setup              Run the plugin setup wizard
+      --list               List all discovered surfaces and panels
+      --add <type:name>    Scaffold a new surface or panel (e.g. --add surface:edit-user)
+                           Supports group prefix: --add surface:user/edit-user
+      --surfaces-dir <dir> Override surfaces directory
+      --panels-dir <dir>   Override side panels directory
+    -q, --quiet            Suppress non-error output
+    -v, --verbose          Show detailed output
 `,
 	};
 
@@ -432,6 +451,8 @@ async function handleInit(args: string[]): Promise<void> {
 			"skip-scripts": { type: "boolean", default: false },
 			"skip-client": { type: "boolean", default: false },
 			"skip-concurrent": { type: "boolean", default: false },
+			"skip-workflow": { type: "boolean", default: false },
+			"with-vite-plugins": { type: "boolean", default: false },
 			"base-url-env": {
 				type: "string",
 				default: DEFAULT_INSTANCE_CONFIG.base_url_env,
@@ -481,6 +502,8 @@ async function handleInit(args: string[]): Promise<void> {
 		skipScripts: values["skip-scripts"] ?? false,
 		skipClient: values["skip-client"] ?? false,
 		skipConcurrent: values["skip-concurrent"] ?? false,
+		skipWorkflow: values["skip-workflow"] ?? false,
+		withVitePlugins: values["with-vite-plugins"] ?? false,
 		baseUrlEnv: values["base-url-env"] ?? DEFAULT_INSTANCE_CONFIG.base_url_env,
 		envAccessor:
 			values["env-accessor"] ?? DEFAULT_INSTANCE_CONFIG.env_accessor,
@@ -494,6 +517,74 @@ async function handleInit(args: string[]): Promise<void> {
 
 	try {
 		await executeInit(options, logger, prompts);
+	} catch (error) {
+		logger.error(formatError(error));
+		process.exitCode = 1;
+	}
+}
+
+async function handlePlugins(args: string[]): Promise<void> {
+	const { values } = parseArgs({
+		args,
+		options: {
+			setup: { type: "boolean", default: false },
+			list: { type: "boolean", default: false },
+			add: { type: "string" },
+			"surfaces-dir": { type: "string" },
+			"panels-dir": { type: "string" },
+			quiet: { type: "boolean", short: "q", default: false },
+			verbose: { type: "boolean", short: "v", default: false },
+		},
+		strict: true,
+	});
+
+	const level = getLogLevel({ quiet: values.quiet, verbose: values.verbose });
+	const logger = createLogger({ level });
+
+	try {
+		if (values.setup) {
+			// Run the setup wizard
+			const prompts = createHeadlessPromptProvider();
+			const { findProjectRoot } = await import("../core/config.js");
+			const projectRoot = await findProjectRoot();
+			await setupVitePlugins(projectRoot, false, logger, prompts);
+			return;
+		}
+
+		if (values.add) {
+			// Parse type:name format, e.g. "surface:edit-user" or "surface:user/edit-user"
+			const [type, ...rest] = values.add.split(":");
+			const fullName = rest.join(":");
+			if (!type || !fullName || (type !== "surface" && type !== "panel")) {
+				console.error('Invalid format. Use --add surface:<name> or --add panel:<name>');
+				console.error('Examples: --add surface:edit-user  --add panel:user/staff-profile');
+				process.exitCode = 1;
+				return;
+			}
+
+			// Parse group from name: "user/edit-user" → group="user", name="edit-user"
+			const parts = fullName.split("/");
+			const name = parts.pop()!;
+			const group = parts.join("/") || undefined;
+
+			const surfacesDir = values["surfaces-dir"] ?? "src/components/surfaces";
+			const sidepanelsDir = values["panels-dir"] ?? "src/components/side-panels";
+
+			if (type === "surface") {
+				await scaffoldNewSurface(name, surfacesDir, logger, group);
+			} else {
+				await scaffoldNewPanel(name, sidepanelsDir, logger, group);
+			}
+			return;
+		}
+
+		// Default: list
+		const options: PluginsActionOptions = {
+			surfacesDir: values["surfaces-dir"],
+			sidepanelsDir: values["panels-dir"],
+		};
+		const result = await executePluginsScan(options, logger);
+		console.log(formatPluginsList(result));
 	} catch (error) {
 		logger.error(formatError(error));
 		process.exitCode = 1;
@@ -530,6 +621,7 @@ export async function runHeadless(
 					cwd: projectRoot,
 					stdio: "pipe",
 					timeout: 30_000,
+					shell: true,
 				},
 			);
 			if (check.status !== 0) {
@@ -541,6 +633,7 @@ export async function runHeadless(
 						cwd: projectRoot,
 						stdio: "pipe",
 						timeout: 60_000,
+						shell: true,
 					},
 				);
 			}
@@ -600,6 +693,9 @@ export async function runHeadless(
 			break;
 		case "init":
 			await handleInit(commandArgs);
+			break;
+		case "plugins":
+			await handlePlugins(commandArgs);
 			break;
 		default:
 			console.error(`Unknown command: ${command}`);

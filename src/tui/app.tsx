@@ -14,6 +14,7 @@ import { InitScreen } from "./screens/init-wizard.js";
 import { ProcessScreen } from "./screens/process-runner.js";
 import { EndpointInspectorScreen } from "./screens/endpoint-inspector.js";
 import { EnvManagerScreen } from "./screens/env-manager.js";
+import { PluginsScreen } from "./screens/plugins-manager.js";
 import { configExists, findProjectRoot, getConfigPath } from "../core/config.js";
 import { processManager } from "./services/process-manager.js";
 
@@ -117,6 +118,8 @@ export function App() {
 				return <EndpointInspectorScreen setInputMode={setInputMode} />;
 			case "env":
 				return <EnvManagerScreen setInputMode={setInputMode} />;
+			case "plugins":
+				return <PluginsScreen setInputMode={setInputMode} />;
 			default: {
 				const _exhaustive: never = state.activeScreen;
 				return <text fg="#f7768e">Unknown screen: {_exhaustive}</text>;

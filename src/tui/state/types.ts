@@ -6,7 +6,8 @@ export type ScreenId =
 	| "validate"
 	| "process"
 	| "inspect"
-	| "env";
+	| "env"
+	| "plugins";
 
 export interface AppState {
 	activeScreen: ScreenId;

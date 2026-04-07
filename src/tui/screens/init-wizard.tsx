@@ -284,6 +284,8 @@ function WizardMode({ onComplete, setInputMode }: WizardModeProps) {
 			skipScripts: false,
 			skipClient: false,
 			skipConcurrent: !values.wantsConcurrent,
+			skipWorkflow: false,
+			withVitePlugins: false,
 			baseUrlEnv: DEFAULT_INSTANCE_CONFIG.base_url_env,
 			envAccessor: DEFAULT_INSTANCE_CONFIG.env_accessor,
 			tokenKey: DEFAULT_INSTANCE_CONFIG.token_key,

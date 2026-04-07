@@ -1,0 +1,53 @@
+# Validates that generated API client code matches the staging API spec.
+# Fails the PR check if generated code is out of date.
+#
+# Setup:
+#   1. Add your staging OpenAPI spec URL as a GitHub repository secret:
+#      Settings > Secrets > Actions > New repository secret
+#      Name: STAGING_API_ENDPOINT
+#      Value: https://your-staging-api.com/openapi.json
+#
+#   2. Ensure chowbea-axios is listed as a devDependency in package.json.
+
+name: Validate Generated API Client
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+
+jobs:
+  validate-generated-code:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+
+      - name: Setup Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Regenerate from staging API
+        run: bunx chowbea-axios fetch --endpoint "${{ secrets.STAGING_API_ENDPOINT }}" --force --quiet
+
+      - name: Check for differences in generated code
+        run: |
+          if git diff --exit-code -- '**/_generated/'; then
+            echo "Generated code is up to date with staging."
+          else
+            echo ""
+            echo "=========================================="
+            echo "  Generated code is out of date!"
+            echo "=========================================="
+            echo ""
+            echo "The generated API client in _generated/ does not match"
+            echo "the staging API spec. Please run locally:"
+            echo ""
+            echo "  chowbea-axios fetch"
+            echo ""
+            echo "Then commit the updated files."
+            echo ""
+            git diff --stat -- '**/_generated/'
+            exit 1
+          fi
