@@ -7,7 +7,8 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { access, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 import {
@@ -25,6 +26,22 @@ import {
 } from "../config.js";
 import { generateClientFiles } from "../generator.js";
 import {
+  generateDefineSurfaceContent,
+  generateSurfaceRegistryContent,
+  generateSurfaceComponentsContent,
+  generateSurfaceDefinitionsGenContent,
+  generateSurfaceIndexContent,
+  generateDefinePanelContent,
+  generatePanelTypesContent,
+  generateUseSidepanelContent,
+  generateSidepanelContainerContent,
+  generateSidepanelLayoutContent,
+  generatePanelDefinitionsGenContent,
+  generatePanelIndexContent,
+  generateUseMobileHookContent,
+} from "../vite-plugin-templates.js";
+import {
+  commandExists,
   detectPackageManager,
   getDlxCommand,
   getInstallCommand,
@@ -76,6 +93,8 @@ export interface InitActionOptions {
   skipScripts: boolean;
   skipClient: boolean;
   skipConcurrent: boolean;
+  skipWorkflow: boolean;
+  withVitePlugins: boolean;
   baseUrlEnv: string;
   envAccessor: string;
   tokenKey: string;
@@ -94,6 +113,9 @@ export interface InitResult {
   concurrentlyInstalled: boolean;
   concurrentScript: string | null;
   initialFetchSuccess: boolean | null;
+  workflowCreated: boolean;
+  surfacesScaffolded: boolean;
+  sidepanelsScaffolded: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -244,6 +266,7 @@ async function ensureAxios(
     cwd: projectRoot,
     stdio: "pipe",
     timeout: 60_000,
+    shell: true,
   });
 
   if (result.status !== 0) {
@@ -414,6 +437,7 @@ async function ensureConcurrently(
     cwd: projectRoot,
     stdio: "pipe",
     timeout: 60_000,
+    shell: true,
   });
 
   if (result.status !== 0) {
@@ -563,6 +587,7 @@ async function runInitialFetch(
   const result = spawnSync(cmd, [...dlxArgs, "chowbea-axios", "fetch"], {
     cwd: projectRoot,
     stdio: "pipe",
+    shell: true,
   });
 
   const runCmd = getRunCommand(pm);
@@ -580,8 +605,348 @@ async function runInitialFetch(
 }
 
 // ---------------------------------------------------------------------------
+// Vite plugin scaffolding
+// ---------------------------------------------------------------------------
+
+type VitePluginChoice = "both" | "surfaces" | "sidepanels" | "none";
+
+/**
+ * Write a file only if it doesn't exist yet (or --force was used).
+ * Returns true if the file was written.
+ */
+export async function writeIfNew(
+  filePath: string,
+  content: string,
+  force: boolean,
+  logger: Logger,
+): Promise<boolean> {
+  let exists = false;
+  try {
+    await access(filePath);
+    exists = true;
+  } catch {
+    /* not found */
+  }
+
+  if (exists && !force) {
+    logger.info(`Skipping ${path.basename(filePath)} (already exists)`);
+    return false;
+  }
+
+  await writeFile(filePath, content, "utf8");
+  logger.info(`Created ${path.basename(filePath)}`);
+  return true;
+}
+
+/**
+ * Scaffold Vite codegen plugin registry files into the user's project.
+ * Only called when --with-vite-plugins is passed.
+ */
+export async function setupVitePlugins(
+  projectRoot: string,
+  force: boolean,
+  logger: Logger,
+  prompts: PromptProvider,
+): Promise<{ surfacesScaffolded: boolean; sidepanelsScaffolded: boolean }> {
+  // 1. Which plugins?
+  const choice = await prompts.select<VitePluginChoice>({
+    message: "Which Vite codegen plugins would you like to set up?",
+    choices: [
+      { name: "Both (Surfaces + Side Panels)", value: "both" },
+      { name: "Surfaces only (modal dialogs / drawers)", value: "surfaces" },
+      { name: "Side Panels only (slide-out panels)", value: "sidepanels" },
+      { name: "None — skip this step", value: "none" },
+    ],
+    default: "both" as VitePluginChoice,
+  });
+
+  if (choice === "none") {
+    logger.info("Skipped Vite plugin scaffolding");
+    return { surfacesScaffolded: false, sidepanelsScaffolded: false };
+  }
+
+  const wantsSurfaces = choice === "both" || choice === "surfaces";
+  const wantsSidepanels = choice === "both" || choice === "sidepanels";
+
+  // 2. Import prefix
+  const importPrefix = await prompts.input({
+    message: "What import alias does your project use?",
+    default: "@/",
+    validate: (v) =>
+      v.trim().length > 0 ? true : "Import prefix is required",
+  });
+
+  // 3. Directories
+  let surfacesDir = "";
+  let sidepanelsDir = "";
+
+  if (wantsSurfaces) {
+    surfacesDir = await prompts.input({
+      message: "Surfaces directory (relative to project root):",
+      default: "src/components/surfaces",
+    });
+  }
+
+  if (wantsSidepanels) {
+    sidepanelsDir = await prompts.input({
+      message: "Side panels directory (relative to project root):",
+      default: "src/components/side-panels",
+    });
+  }
+
+  // 4. Scaffold surfaces registry
+  let surfacesScaffolded = false;
+  if (wantsSurfaces) {
+    logger.step("surfaces", "Scaffolding surfaces registry...");
+    const registryDir = path.join(projectRoot, surfacesDir, "_registry");
+    await mkdir(registryDir, { recursive: true });
+
+    await writeIfNew(
+      path.join(registryDir, "define-surface.ts"),
+      generateDefineSurfaceContent(),
+      force,
+      logger,
+    );
+    await writeIfNew(
+      path.join(registryDir, "surface.registry.ts"),
+      generateSurfaceRegistryContent(),
+      force,
+      logger,
+    );
+    await writeIfNew(
+      path.join(registryDir, "surface.tsx"),
+      generateSurfaceComponentsContent(importPrefix),
+      force,
+      logger,
+    );
+    await writeIfNew(
+      path.join(registryDir, "surface-definitions.gen.ts"),
+      generateSurfaceDefinitionsGenContent(),
+      force,
+      logger,
+    );
+    await writeIfNew(
+      path.join(registryDir, "index.ts"),
+      generateSurfaceIndexContent(),
+      force,
+      logger,
+    );
+    surfacesScaffolded = true;
+  }
+
+  // 5. Scaffold sidepanels registry
+  let sidepanelsScaffolded = false;
+  if (wantsSidepanels) {
+    logger.step("sidepanels", "Scaffolding side panels registry...");
+    const registryDir = path.join(projectRoot, sidepanelsDir, "_registry");
+    await mkdir(registryDir, { recursive: true });
+
+    await writeIfNew(
+      path.join(registryDir, "define-panel.ts"),
+      generateDefinePanelContent(),
+      force,
+      logger,
+    );
+    await writeIfNew(
+      path.join(registryDir, "types.ts"),
+      generatePanelTypesContent(),
+      force,
+      logger,
+    );
+    await writeIfNew(
+      path.join(registryDir, "use-sidepanel.ts"),
+      generateUseSidepanelContent(),
+      force,
+      logger,
+    );
+    await writeIfNew(
+      path.join(registryDir, "sidepanel.container.tsx"),
+      generateSidepanelContainerContent(importPrefix),
+      force,
+      logger,
+    );
+    await writeIfNew(
+      path.join(registryDir, "sidepanel.layout.tsx"),
+      generateSidepanelLayoutContent(importPrefix),
+      force,
+      logger,
+    );
+    await writeIfNew(
+      path.join(registryDir, "panel-definitions.gen.ts"),
+      generatePanelDefinitionsGenContent(),
+      force,
+      logger,
+    );
+    await writeIfNew(
+      path.join(registryDir, "index.ts"),
+      generatePanelIndexContent(),
+      force,
+      logger,
+    );
+    sidepanelsScaffolded = true;
+  }
+
+  // 6. Generate use-mobile hook (needed by surfaces + sidepanel layout)
+  if (wantsSurfaces || wantsSidepanels) {
+    const hooksDir = path.join(projectRoot, "src", "hooks");
+    const hookPath = path.join(hooksDir, "use-mobile.ts");
+    await mkdir(hooksDir, { recursive: true });
+    await writeIfNew(hookPath, generateUseMobileHookContent(), force, logger);
+  }
+
+  // 7. Log dependency info
+  logger.step("deps", "Required dependencies:");
+  logger.info("  zustand                          (state management)");
+  if (wantsSidepanels) {
+    logger.info("  zod                              (param validation)");
+    logger.info(
+      "  @hugeicons/core-free-icons       (panel icons)",
+    );
+    logger.info(
+      "  @hugeicons/react                 (icon renderer)",
+    );
+    logger.info(
+      "  @tanstack/react-router           (route params)",
+    );
+  }
+
+  logger.info("");
+  logger.step("shadcn", "Required shadcn components:");
+  if (wantsSurfaces) {
+    logger.info(
+      "  npx shadcn@latest add button dialog drawer alert-dialog scroll-area",
+    );
+  }
+  if (wantsSidepanels) {
+    logger.info("  npx shadcn@latest add button select empty");
+  }
+
+  // 8. Log vite.config.ts instructions
+  logger.info("");
+  logger.step("vite", "Add to your vite.config.ts:");
+  const pluginImports: string[] = [];
+  const pluginCalls: string[] = [];
+  if (wantsSurfaces) {
+    pluginImports.push("surfacesCodegen");
+    pluginCalls.push(
+      surfacesDir === "src/components/surfaces"
+        ? "surfacesCodegen()"
+        : `surfacesCodegen({ directory: '${surfacesDir}' })`,
+    );
+  }
+  if (wantsSidepanels) {
+    pluginImports.push("sidepanelsCodegen");
+    pluginCalls.push(
+      sidepanelsDir === "src/components/side-panels"
+        ? "sidepanelsCodegen()"
+        : `sidepanelsCodegen({ directory: '${sidepanelsDir}' })`,
+    );
+  }
+  logger.info(
+    `  import { ${pluginImports.join(", ")} } from 'chowbea-axios/vite'`,
+  );
+  logger.info(
+    `  plugins: [${pluginCalls.join(", ")}, ...]`,
+  );
+
+  return { surfacesScaffolded, sidepanelsScaffolded };
+}
+
+// ---------------------------------------------------------------------------
 // Main action entry point
 // ---------------------------------------------------------------------------
+
+/**
+ * Scaffold GitHub Actions workflow for validating generated code in PRs.
+ */
+async function setupWorkflow(
+  projectRoot: string,
+  force: boolean,
+  logger: Logger,
+  prompts: PromptProvider,
+): Promise<boolean> {
+  const wantsWorkflow = await prompts.confirm({
+    message:
+      "Add a GitHub Actions workflow to validate generated code in PRs?",
+    default: true,
+  });
+
+  if (!wantsWorkflow) {
+    logger.info("Skipped CI workflow setup");
+    return false;
+  }
+
+  const workflowDir = path.join(projectRoot, ".github", "workflows");
+  const workflowPath = path.join(workflowDir, "chowbea-axios-ci.yml");
+
+  let exists = false;
+  try {
+    await access(workflowPath);
+    exists = true;
+  } catch {
+    /* not found */
+  }
+
+  if (exists && !force) {
+    const shouldOverwrite = await prompts.confirm({
+      message: "chowbea-axios-ci.yml already exists. Overwrite?",
+      default: false,
+    });
+    if (!shouldOverwrite) {
+      logger.info("Skipping workflow creation");
+      return false;
+    }
+  }
+
+  logger.step("workflow", "Creating GitHub Actions workflow...");
+
+  const thisDir = path.dirname(fileURLToPath(import.meta.url));
+  const templatePath = path.resolve(
+    thisDir,
+    "..",
+    "..",
+    "..",
+    "templates",
+    "chowbea-axios-ci.yml",
+  );
+  const template = await readFile(templatePath, "utf8");
+
+  await mkdir(workflowDir, { recursive: true });
+  await writeFile(workflowPath, template, "utf8");
+  logger.info(`Created ${workflowPath}`);
+  logger.info(
+    "Set STAGING_API_ENDPOINT in your GitHub repository secrets",
+  );
+
+  return true;
+}
+
+/**
+ * Append chowbea-axios gitignore entries if not already present.
+ */
+async function ensureGitignoreEntries(
+  projectRoot: string,
+  logger: Logger,
+): Promise<void> {
+  const gitignorePath = path.join(projectRoot, ".gitignore");
+  const entry = "_internal/";
+  const header =
+    "# chowbea-axios cache (timestamps, downloaded specs)";
+
+  let content = "";
+  try {
+    content = await readFile(gitignorePath, "utf8");
+  } catch {
+    // No .gitignore yet — we'll create one
+  }
+
+  const lines = content.split("\n").map((l) => l.trim());
+  if (lines.includes(entry)) return;
+
+  const block = `\n${header}\n${entry}\n`;
+  await writeFile(gitignorePath, content + block, "utf8");
+  logger.step("gitignore", `Added ${entry} to .gitignore`);
+}
 
 /**
  * Execute the init workflow.
@@ -628,6 +993,9 @@ export async function executeInit(
         concurrentlyInstalled: false,
         concurrentScript: null,
         initialFetchSuccess: null,
+        workflowCreated: false,
+        surfacesScaffolded: false,
+        sidepanelsScaffolded: false,
       };
     }
   }
@@ -662,23 +1030,22 @@ export async function executeInit(
   });
 
   // Verify package manager binary exists
-  const pmCheck = spawnSync(pm, ["--version"], {
-    stdio: "pipe",
-  });
-  if (pmCheck.status !== 0) {
+  if (!commandExists(pm)) {
     throw new Error(
       `Package manager "${pm}" not found in PATH. Please install it first.`,
     );
   }
 
+  // Detect Vite project (used for env accessor and optional plugin scaffolding)
+  const hasViteConfig = await hasFile(projectRoot, [
+    "vite.config.ts",
+    "vite.config.js",
+    "vite.config.mts",
+  ]);
+
   // Auto-detect env accessor from framework config files
   let envAccessor = options.envAccessor;
   if (envAccessor === DEFAULT_INSTANCE_CONFIG.env_accessor) {
-    const hasViteConfig = await hasFile(projectRoot, [
-      "vite.config.ts",
-      "vite.config.js",
-      "vite.config.mts",
-    ]);
     if (hasViteConfig) {
       envAccessor = "import.meta.env";
       logger.info("Detected Vite project — using import.meta.env");
@@ -791,12 +1158,46 @@ export async function executeInit(
     );
   }
 
-  // Step 6: Run initial fetch (if not localhost default)
+  // Step 5.5: Set up Vite plugins (opt-in via --with-vite-plugins)
+  let surfacesScaffolded = false;
+  let sidepanelsScaffolded = false;
+  if (options.withVitePlugins) {
+    if (hasViteConfig) {
+      const viteResult = await setupVitePlugins(
+        projectRoot,
+        options.force,
+        logger,
+        prompts,
+      );
+      surfacesScaffolded = viteResult.surfacesScaffolded;
+      sidepanelsScaffolded = viteResult.sidepanelsScaffolded;
+    } else {
+      logger.warn(
+        "--with-vite-plugins was set but no vite.config found. Skipping.",
+      );
+    }
+  }
+
+  // Step 6: Ensure _internal/ is in .gitignore
+  await ensureGitignoreEntries(projectRoot, logger);
+
+  // Step 7: Run initial fetch (if not localhost default)
   const isLocalhost =
     apiEndpoint.includes("localhost") || apiEndpoint.includes("127.0.0.1");
   let initialFetchSuccess: boolean | null = null;
   if (!isLocalhost) {
     initialFetchSuccess = await runInitialFetch(projectRoot, pm, logger);
+  }
+
+  // Step 8: Scaffold CI workflow (optional)
+  let workflowCreated = false;
+  if (!options.skipWorkflow) {
+    workflowCreated = await setupWorkflow(
+      projectRoot,
+      options.force,
+      logger,
+      prompts,
+    );
   }
 
   // Summary
@@ -820,5 +1221,8 @@ export async function executeInit(
     concurrentlyInstalled,
     concurrentScript,
     initialFetchSuccess,
+    workflowCreated,
+    surfacesScaffolded,
+    sidepanelsScaffolded,
   };
 }

@@ -12,6 +12,7 @@ const SCREENS: Array<{ id: ScreenId; label: string; altLabel?: string; key: stri
 	{ id: "process", label: "Processes", key: "6" },
 	{ id: "inspect", label: "Inspect", key: "7" },
 	{ id: "env", label: "Env", key: "8" },
+	{ id: "plugins", label: "Plugins", key: "9" },
 ];
 
 interface SidebarProps {

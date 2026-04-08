@@ -20,6 +20,9 @@ export function FetchGenerateScreen() {
 	const [logs, setLogs] = useState<LogEntry[]>([]);
 	const [result, setResult] = useState<FetchActionResult | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	const [force, setForce] = useState(false);
+	const forceRef = useRef(false);
+	forceRef.current = force;
 	const runningRef = useRef(false);
 
 	const runFetch = useCallback(() => {
@@ -39,7 +42,7 @@ export function FetchGenerateScreen() {
 
 		executeFetch(
 			{
-				force: false,
+				force: forceRef.current,
 				dryRun: false,
 				typesOnly: false,
 				operationsOnly: false,
@@ -65,11 +68,12 @@ export function FetchGenerateScreen() {
 	}, []);
 
 	useKeyboard((key) => {
-		if (
-			key.name === "return" &&
-			(phase === "idle" || phase === "done" || phase === "error")
-		) {
-			runFetch();
+		if (phase === "idle" || phase === "done" || phase === "error") {
+			if (key.name === "return") {
+				runFetch();
+			} else if (key.raw === "f") {
+				setForce((prev) => !prev);
+			}
 		}
 	});
 
@@ -81,10 +85,20 @@ export function FetchGenerateScreen() {
 
 			{/* Status / prompt */}
 			{phase === "idle" && (
-				<box flexDirection="row">
-					<text fg={colors.fgDim}>{"Press "}</text>
-					<text fg={colors.accent}>{"Enter"}</text>
-					<text fg={colors.fgDim}>{" to fetch spec and generate client code."}</text>
+				<box flexDirection="column" gap={0}>
+					<box flexDirection="row">
+						<text fg={colors.fgDim}>{"Press "}</text>
+						<text fg={colors.accent}>{"Enter"}</text>
+						<text fg={colors.fgDim}>{" to fetch spec and generate client code."}</text>
+					</box>
+					<box flexDirection="row">
+						<text fg={colors.fgDim}>{"Press "}</text>
+						<text fg={colors.accent}>{"f"}</text>
+						<text fg={colors.fgDim}>{" to toggle force mode: "}</text>
+						<text fg={force ? colors.success : colors.fgDim}>
+							{force ? "ON" : "OFF"}
+						</text>
+					</box>
 				</box>
 			)}
 
@@ -183,7 +197,12 @@ export function FetchGenerateScreen() {
 					<box flexDirection="row">
 						<text fg={colors.fgDim}>{"Press "}</text>
 						<text fg={colors.accent}>{"Enter"}</text>
-						<text fg={colors.fgDim}>{" to run again."}</text>
+						<text fg={colors.fgDim}>{" to run again, "}</text>
+						<text fg={colors.accent}>{"f"}</text>
+						<text fg={colors.fgDim}>{" to toggle force: "}</text>
+						<text fg={force ? colors.success : colors.fgDim}>
+							{force ? "ON" : "OFF"}
+						</text>
 					</box>
 				</box>
 			)}

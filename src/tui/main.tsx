@@ -6,18 +6,11 @@ import { createRoot } from "@opentui/react";
 import { App } from "./app.js";
 import { findProjectRoot } from "../core/config.js";
 import {
+	commandExists,
 	detectPackageManager,
 	getDlxCommand,
 	getInstallCommand,
 } from "../core/pm.js";
-
-/**
- * Checks whether a shell command exists on the system PATH.
- */
-function commandExists(cmd: string): boolean {
-	const result = spawnSync(cmd, ["--version"], { stdio: "pipe" });
-	return result.status === 0;
-}
 
 /**
  * Checks whether a file or directory exists at the given path.
@@ -63,6 +56,7 @@ async function installPackage(
 		cwd: projectRoot,
 		stdio: "inherit",
 		timeout: 60_000,
+		shell: true,
 	});
 }
 
@@ -81,6 +75,7 @@ async function ensureOpenApiTypescript(projectRoot: string): Promise<void> {
 			cwd: projectRoot,
 			stdio: "pipe",
 			timeout: 30_000,
+			shell: true,
 		},
 	);
 
@@ -91,6 +86,7 @@ async function ensureOpenApiTypescript(projectRoot: string): Promise<void> {
 			cwd: projectRoot,
 			stdio: "pipe",
 			timeout: 60_000,
+			shell: true,
 		});
 	}
 }
@@ -121,6 +117,7 @@ async function ensureProjectDependencies(): Promise<void> {
 				cwd: projectRoot,
 				stdio: "inherit",
 				timeout: 120_000,
+				shell: true,
 			});
 		}
 

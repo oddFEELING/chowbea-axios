@@ -1,13 +1,13 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "node:path";
+import { commandExists } from "./core/pm.js";
 
 /**
  * Check if Bun is available on the system.
  */
 function hasBun(): boolean {
-	const result = spawnSync("bun", ["--version"], { stdio: "pipe" });
-	return result.status === 0;
+	return commandExists("bun");
 }
 
 /**
@@ -23,6 +23,7 @@ function relaunchWithBun(argv: string[]): boolean {
 	const result = spawnSync("bun", [tsEntry, ...argv.slice(2)], {
 		stdio: "inherit",
 		env: process.env,
+		shell: true,
 	});
 
 	if (result.error) return false;

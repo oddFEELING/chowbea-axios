@@ -8,6 +8,7 @@ import pc from "picocolors";
 import type { StatusResult } from "../core/actions/status.js";
 import { formatTimeAgo } from "../core/actions/status.js";
 import type { DiffResult } from "../core/actions/diff.js";
+import type { PluginsResult } from "../core/actions/plugins.js";
 
 /** Indentation for sub-messages under a step (14 spaces). */
 const INDENT = "              ";
@@ -208,5 +209,87 @@ export function formatDiffSummary(result: DiffResult): string {
 		`  ${pc.dim("Run 'chowbea-axios fetch' to apply these changes")}`,
 	);
 
+	return lines.join("\n");
+}
+
+/**
+ * Formats the plugins scan result as a colored string for terminal output.
+ * Groups surfaces and panels by their group field with indentation.
+ */
+export function formatPluginsList(result: PluginsResult): string {
+	const lines: string[] = [];
+
+	lines.push("");
+	lines.push(`  ${pc.bold("chowbea-axios plugins")}`);
+	lines.push("");
+
+	// Surfaces section
+	if (!result.surfacesConfigured) {
+		lines.push(
+			`  ${pc.cyan("\u25cf")} ${pc.bold(pc.cyan(pad("surfaces")))}${pc.red("not configured")} ${pc.dim("- run 'chowbea-axios plugins --setup'")}`,
+		);
+	} else {
+		lines.push(
+			`  ${pc.cyan("\u25cf")} ${pc.bold(pc.cyan(pad("surfaces")))}${pc.dim("dir:")} ${pc.cyan(result.surfacesDir ?? "n/a")}  ${pc.dim("count:")} ${pc.yellow(String(result.surfaces.length))}`,
+		);
+
+		if (result.surfaces.length > 0) {
+			for (const group of result.surfaceGroups) {
+				const groupLabel = group || "(root)";
+				const items = result.surfaces.filter((s) => s.group === group);
+				if (items.length === 0) continue;
+
+				lines.push(`${INDENT}${pc.dim(groupLabel)}`);
+				for (const s of items) {
+					const meta = [
+						pc.dim(`variant:${s.variant}`),
+						s.defaultProps.length > 0
+							? pc.dim(`props:[${s.defaultProps.join(",")}]`)
+							: null,
+					]
+						.filter(Boolean)
+						.join("  ");
+					lines.push(`${INDENT}  ${pc.green(s.id)} ${meta}`);
+				}
+			}
+		}
+	}
+	lines.push("");
+
+	// Panels section
+	if (!result.sidepanelsConfigured) {
+		lines.push(
+			`  ${pc.cyan("\u25cf")} ${pc.bold(pc.cyan(pad("panels")))}${pc.red("not configured")} ${pc.dim("- run 'chowbea-axios plugins --setup'")}`,
+		);
+	} else {
+		lines.push(
+			`  ${pc.cyan("\u25cf")} ${pc.bold(pc.cyan(pad("panels")))}${pc.dim("dir:")} ${pc.cyan(result.sidepanelsDir ?? "n/a")}  ${pc.dim("count:")} ${pc.yellow(String(result.panels.length))}`,
+		);
+
+		if (result.panels.length > 0) {
+			for (const group of result.panelGroups) {
+				const groupLabel = group || "(root)";
+				const items = result.panels.filter((p) => p.group === group);
+				if (items.length === 0) continue;
+
+				lines.push(`${INDENT}${pc.dim(groupLabel)}`);
+				for (const p of items) {
+					const meta = [
+						p.contextParams.length > 0
+							? pc.dim(`context:[${p.contextParams.join(",")}]`)
+							: null,
+						p.routeParams.length > 0
+							? pc.dim(`routes:[${p.routeParams.join(",")}]`)
+							: null,
+					]
+						.filter(Boolean)
+						.join("  ");
+					lines.push(`${INDENT}  ${pc.green(p.id)} ${meta}`);
+				}
+			}
+		}
+	}
+
+	lines.push("");
 	return lines.join("\n");
 }

@@ -8,6 +8,7 @@
 import { useState, useEffect, useCallback, useSyncExternalStore } from "react";
 import { useKeyboard } from "@opentui/react";
 import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { findProjectRoot } from "../../core/config.js";
 import { processManager } from "../services/process-manager.js";
 import { tabStore } from "../services/tab-store.js";
@@ -67,7 +68,7 @@ export function ProcessScreen({ setInputMode }: ProcessScreenProps) {
 			const root = projectRoot || (await findProjectRoot());
 			if (!projectRoot) setProjectRoot(root);
 
-			const raw = await readFile(`${root}/package.json`, "utf8");
+			const raw = await readFile(join(root, "package.json"), "utf8");
 			const pkg = JSON.parse(raw) as {
 				scripts?: Record<string, string>;
 			};

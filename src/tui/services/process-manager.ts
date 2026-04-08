@@ -4,7 +4,7 @@
  */
 
 import { spawn, type ChildProcess } from "node:child_process";
-import { delimiter } from "node:path";
+import { delimiter, join } from "node:path";
 
 const MAX_OUTPUT_LINES = 500;
 
@@ -48,18 +48,20 @@ class ProcessManager {
 	run(entry: { name: string; command: string }, projectRoot: string): string {
 		const id = `${entry.name}-${Date.now()}`;
 		const isWindows = process.platform === "win32";
-		const shell = isWindows ? "cmd" : "sh";
-		const shellArgs = isWindows ? ["/c", entry.command] : ["-c", entry.command];
 
 		const pathKey = isWindows ? "Path" : "PATH";
-		const binDir = `${projectRoot}/node_modules/.bin`;
+		const binDir = join(projectRoot, "node_modules", ".bin");
 		const existingPath = process.env[pathKey] ?? "";
 		const env = {
 			...process.env,
 			[pathKey]: `${binDir}${delimiter}${existingPath}`,
 		};
 
-		const child = spawn(shell, shellArgs, { cwd: projectRoot, env });
+		const child = spawn(entry.command, [], {
+			cwd: projectRoot,
+			env,
+			shell: true,
+		});
 		this.children.set(id, child);
 
 		const newProc: ProcessInfo = {
@@ -75,7 +77,7 @@ class ProcessManager {
 		this.notify();
 
 		const appendOutput = (chunk: Buffer, stream: "stdout" | "stderr") => {
-			const lines = chunk.toString().split("\n").filter(Boolean);
+			const lines = chunk.toString().split(/\r?\n/).filter(Boolean);
 			this.processes = this.processes.map((p) => {
 				if (p.id !== id) return p;
 				const merged = [

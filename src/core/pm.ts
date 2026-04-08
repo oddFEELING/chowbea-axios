@@ -3,6 +3,7 @@
  * Shared across init, generate, and fetch commands.
  */
 
+import { spawnSync } from "node:child_process";
 import { access } from "node:fs/promises";
 import path from "node:path";
 
@@ -82,4 +83,13 @@ export function getInstallCommand(
  */
 export function getRunCommand(pm: PackageManager): string {
 	return pm === "npm" ? "npm run" : pm;
+}
+
+/**
+ * Checks whether a command exists on the system PATH.
+ * Uses shell: true so Windows can resolve .exe/.cmd wrappers.
+ */
+export function commandExists(cmd: string): boolean {
+	const result = spawnSync(cmd, ["--version"], { stdio: "pipe", shell: true });
+	return result.status === 0;
 }

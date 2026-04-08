@@ -27,6 +27,7 @@ const SCREEN_DESCRIPTIONS: Record<ScreenId, string> = {
 	process: "Running processes",
 	inspect: "Browse API endpoints",
 	env: "Manage .env files",
+	plugins: "Manage Surfaces & Panels",
 };
 
 function buildPaletteItems(onQuit: () => void): PaletteItem[] {

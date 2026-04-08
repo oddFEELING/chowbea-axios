@@ -502,6 +502,8 @@ export interface OutputPaths {
   types: string;
   /** Path to api.operations.ts (generated operations) */
   operations: string;
+  /** Path to api.contracts.ts (concrete type contracts - always overwritten) */
+  contracts: string;
   /** Path to api.helpers.ts (utility types - generated once) */
   helpers: string;
   /** Path to openapi.json spec file */
@@ -537,6 +539,7 @@ export function getOutputPaths(
     // _generated/ files (always overwritten)
     types: path.join(generated, "api.types.ts"),
     operations: path.join(generated, "api.operations.ts"),
+    contracts: path.join(generated, "api.contracts.ts"),
     // Root files (generated once, user-editable)
     helpers: path.join(folder, "api.helpers.ts"),
     instance: path.join(folder, "api.instance.ts"),
