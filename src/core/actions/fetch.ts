@@ -41,6 +41,12 @@ export interface FetchActionOptions {
 	typesOnly: boolean;
 	/** Generate only operations (skip types) */
 	operationsOnly: boolean;
+	/**
+	 * Pre-resolved Basic Auth credentials. When provided, overrides
+	 * config-based env var lookup and skips interactive prompts.
+	 * Used by the TUI to collect credentials via its own UI layer.
+	 */
+	auth?: { username: string; password: string };
 }
 
 /**
@@ -108,6 +114,8 @@ async function resolveBasicAuth(
 		if (!username) {
 			username = await prompts.input({
 				message: "Swagger username:",
+				validate: (value) =>
+					value.trim().length > 0 ? true : "Username is required",
 			});
 		}
 		if (!password) {
@@ -115,6 +123,12 @@ async function resolveBasicAuth(
 				message: "Swagger password:",
 				mask: "*",
 			});
+		}
+
+		if (!username?.trim() || !password) {
+			throw new Error(
+				"Basic Auth credentials are incomplete. Both username and password are required."
+			);
 		}
 
 		return { username, password };
@@ -196,9 +210,14 @@ export async function executeFetch(
 		logger.step("fetch", "Fetching OpenAPI spec...");
 		logger.debug({ endpoint: specSource.endpoint }, "endpoint");
 
-		// Resolve auth credentials if configured
+		// Resolve auth credentials if configured.
+		// Caller-supplied options.auth (e.g., from TUI) takes precedence
+		// over config-based env var lookup and interactive prompts.
 		let auth: { username: string; password: string } | undefined;
-		if (config.fetch?.auth?.type === "basic") {
+		if (options.auth) {
+			auth = options.auth;
+			logger.debug("Using Basic Auth credentials from caller");
+		} else if (config.fetch?.auth?.type === "basic") {
 			auth = await resolveBasicAuth(config.fetch.auth, logger, prompts);
 		}
 

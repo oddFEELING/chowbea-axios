@@ -49,19 +49,31 @@ password(opts: {
 }): Promise<string>;
 ```
 
-- **Headless**: Uses `@inquirer/prompts` `password()` (masks input with `*`)
-- **TUI**: Uses masked `input()` component
+- **Headless**: Uses `@inquirer/prompts` `password()` (masks input with `*`).
+  Only wired when stdin/stdout are TTY — CI/piped contexts skip prompts and
+  fall through to the clear "credentials incomplete" error path.
+- **TUI**: The `PromptProvider` replay implementations in `init-wizard.tsx`
+  and `plugins-manager.tsx` stub `password()` as a no-op returning `""` (they
+  don't need credential prompts). The `fetch-generate.tsx` screen handles
+  auth differently — it pre-resolves credentials via its own input UI and
+  passes them through `FetchActionOptions.auth`, bypassing the
+  `PromptProvider` path entirely.
 
 ### Auth Resolution Flow
 
 In `executeFetch()`:
 
-1. Read `config.fetch?.auth`
-2. If `auth.type === "basic"`:
+1. If `options.auth` is provided (e.g., from TUI pre-resolution), use it directly
+2. Otherwise, read `config.fetch?.auth`
+3. If `auth.type === "basic"`:
    a. Try to resolve `username` and `password` via env var interpolation
-   b. If either is missing/empty and stdin is a TTY → prompt interactively via `PromptProvider`
-   c. If either is missing/empty and stdin is NOT a TTY → throw error with message to set env vars
-3. Pass resolved `{ username, password }` to `fetchOpenApiSpec()`
+   b. If both resolved → return credentials
+   c. If either is missing and a `PromptProvider` is provided (TTY only) → prompt interactively
+   d. After prompting, validate non-empty username/password; throw if either is empty
+   e. If no `PromptProvider` (non-TTY/CI) → throw error with message to set env vars
+4. Pass resolved `{ username, password }` to `fetchOpenApiSpec()`
+
+The headless CLI only constructs its `PromptProvider` when both `process.stdin.isTTY` and `process.stdout.isTTY` are truthy, so CI/piped runs always hit the clear error path instead of hanging on stdin.
 4. `fetchOpenApiSpec()` constructs `Authorization: Basic <base64(user:pass)>` header
 
 ### Changes to `executeFetch()` Signature
@@ -72,6 +84,15 @@ export async function executeFetch(
   logger: Logger,
   prompts?: PromptProvider,  // optional — only needed when auth requires interactive input
 ): Promise<FetchActionResult>
+```
+
+`FetchActionOptions` gains an optional `auth` field for callers (like the TUI) that resolve credentials via their own UI:
+
+```typescript
+export interface FetchActionOptions {
+  // ... existing fields ...
+  auth?: { username: string; password: string };
+}
 ```
 
 ### Changes to `fetchOpenApiSpec()`
@@ -85,9 +106,13 @@ export async function fetchOpenApiSpec(options: {
 }): Promise<FetchResult>
 ```
 
-If `auth` is provided, construct and add the header:
+If `auth` is provided, construct and add the header. Any existing `Authorization` header is removed case-insensitively first, so Basic Auth always wins regardless of how the config header was cased:
+
 ```typescript
 const credentials = Buffer.from(`${auth.username}:${auth.password}`).toString("base64");
+for (const key of Object.keys(headers)) {
+  if (key.toLowerCase() === "authorization") delete headers[key];
+}
 headers["Authorization"] = `Basic ${credentials}`;
 ```
 

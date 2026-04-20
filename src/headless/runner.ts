@@ -240,7 +240,10 @@ async function handleFetch(args: string[]): Promise<void> {
 	};
 
 	try {
-		const prompts = createHeadlessPromptProvider();
+		const prompts =
+			process.stdin.isTTY && process.stdout.isTTY
+				? createHeadlessPromptProvider()
+				: undefined;
 		const result = await executeFetch(options, logger, prompts);
 		if (!result.specChanged && !values.quiet) {
 			logger.info("Spec unchanged, nothing to do. Use --force to regenerate.");

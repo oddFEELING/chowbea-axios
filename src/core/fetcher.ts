@@ -185,6 +185,12 @@ export async function fetchOpenApiSpec(options: {
 		const credentials = Buffer.from(
 			`${options.auth.username}:${options.auth.password}`
 		).toString("base64");
+		// Remove any existing Authorization header (case-insensitive) to avoid duplicates
+		for (const key of Object.keys(headers)) {
+			if (key.toLowerCase() === "authorization") {
+				delete headers[key];
+			}
+		}
 		headers["Authorization"] = `Basic ${credentials}`;
 	}
 
