@@ -77,6 +77,8 @@ export interface PromptProvider {
 
   confirm(opts: { message: string; default?: boolean }): Promise<boolean>;
 
+  password(opts: { message: string; mask?: string }): Promise<string>;
+
   checkbox<T>(opts: {
     message: string;
     choices: Array<{ name: string; value: T }>;

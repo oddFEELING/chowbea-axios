@@ -193,6 +193,10 @@ function createHeadlessPromptProvider(): PromptProvider {
 			const { confirm } = await import("@inquirer/prompts");
 			return confirm(opts);
 		},
+		async password(opts) {
+			const { password } = await import("@inquirer/prompts");
+			return password({ message: opts.message, mask: opts.mask });
+		},
 		async checkbox(opts) {
 			const { checkbox } = await import("@inquirer/prompts");
 			return checkbox(opts);
@@ -236,7 +240,8 @@ async function handleFetch(args: string[]): Promise<void> {
 	};
 
 	try {
-		const result = await executeFetch(options, logger);
+		const prompts = createHeadlessPromptProvider();
+		const result = await executeFetch(options, logger, prompts);
 		if (!result.specChanged && !values.quiet) {
 			logger.info("Spec unchanged, nothing to do. Use --force to regenerate.");
 		}

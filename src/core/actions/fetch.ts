@@ -8,16 +8,19 @@ import type { Logger } from "../../adapters/logger-interface.js";
 import { formatDuration } from "../../adapters/logger-interface.js";
 import {
 	ensureOutputFolders,
+	type FetchAuthConfig,
 	getOutputPaths,
 	loadConfig,
 	resolveSpecSource,
 } from "../config.js";
 import {
 	fetchOpenApiSpec,
+	interpolateEnvVars,
 	loadLocalSpecFile,
 	saveSpec,
 } from "../fetcher.js";
 import { generate, generateClientFiles } from "../generator.js";
+import type { PromptProvider } from "./init.js";
 import type { ClientFilesResult, DryRunResult } from "./types.js";
 
 /**
@@ -63,15 +66,80 @@ export interface FetchActionResult {
 }
 
 /**
+ * Resolves Basic Auth credentials from config, env vars, or interactive prompts.
+ * Returns resolved credentials or undefined if no auth is configured.
+ */
+async function resolveBasicAuth(
+	authConfig: FetchAuthConfig,
+	logger: Logger,
+	prompts?: PromptProvider,
+): Promise<{ username: string; password: string }> {
+	let username: string | undefined;
+	let password: string | undefined;
+
+	// Try resolving username from config (with env var interpolation)
+	if (authConfig.username) {
+		try {
+			username = interpolateEnvVars(authConfig.username);
+		} catch {
+			// Env var not set — will prompt or error below
+		}
+	}
+
+	// Try resolving password from config (with env var interpolation)
+	if (authConfig.password) {
+		try {
+			password = interpolateEnvVars(authConfig.password);
+		} catch {
+			// Env var not set — will prompt or error below
+		}
+	}
+
+	// If credentials are complete, return them
+	if (username && password) {
+		logger.debug("Using Basic Auth credentials from config/env");
+		return { username, password };
+	}
+
+	// Try interactive prompts
+	if (prompts) {
+		logger.info("Basic Auth credentials needed for spec endpoint");
+
+		if (!username) {
+			username = await prompts.input({
+				message: "Swagger username:",
+			});
+		}
+		if (!password) {
+			password = await prompts.password({
+				message: "Swagger password:",
+				mask: "*",
+			});
+		}
+
+		return { username, password };
+	}
+
+	// Non-interactive and credentials are incomplete
+	throw new Error(
+		"Basic Auth credentials are incomplete. " +
+			"Set the environment variables referenced in [fetch.auth] " +
+			"(e.g. SWAGGER_USER, SWAGGER_PASS), or run interactively to be prompted."
+	);
+}
+
+/**
  * Executes the fetch action: fetch OpenAPI spec, cache it, and generate types/operations.
  *
  * @param options - Fetch action options (replaces CLI flags)
  * @param logger - Logger instance for output
+ * @param prompts - Optional prompt provider for interactive auth credential input
  * @returns Structured result with all data the UI needs
  */
 export async function executeFetch(
 	options: FetchActionOptions,
 	logger: Logger,
+	prompts?: PromptProvider,
 ): Promise<FetchActionResult> {
 	const startTime = Date.now();
 
@@ -128,6 +196,12 @@ export async function executeFetch(
 		logger.step("fetch", "Fetching OpenAPI spec...");
 		logger.debug({ endpoint: specSource.endpoint }, "endpoint");
 
+		// Resolve auth credentials if configured
+		let auth: { username: string; password: string } | undefined;
+		if (config.fetch?.auth?.type === "basic") {
+			auth = await resolveBasicAuth(config.fetch.auth, logger, prompts);
+		}
+
 		fetchResult = await fetchOpenApiSpec({
 			endpoint: specSource.endpoint,
 			specPath: outputPaths.spec,
@@ -135,6 +209,7 @@ export async function executeFetch(
 			logger,
 			force: options.force,
 			headers: config.fetch?.headers,
+			auth,
 		});
 
 		// Handle network fallback
