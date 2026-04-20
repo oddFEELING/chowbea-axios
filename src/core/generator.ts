@@ -66,28 +66,6 @@ function extractPathParams(pathTemplate: string): string[] {
 }
 
 /**
- * Converts a path parameter name to camelCase.
- * Example: "user_id" -> "userId", "user-id" -> "userId"
- */
-function toCamelCase(str: string): string {
-	return str.replace(/[-_]([a-z])/g, (_, letter: string) =>
-		letter.toUpperCase()
-	);
-}
-
-/**
- * Generates TypeScript type for path parameters.
- */
-function generatePathParamsType(pathParams: string[]): string | null {
-	if (pathParams.length === 0) return null;
-
-	const params = pathParams
-		.map((param) => `${toCamelCase(param)}: string | number`)
-		.join(", ");
-	return `{ ${params} }`;
-}
-
-/**
  * OpenAPI operation metadata extracted from spec.
  */
 interface OperationMetadata {
@@ -97,6 +75,9 @@ interface OperationMetadata {
 	pathParams: string[];
 	hasRequestBody: boolean;
 	hasQueryParams: boolean;
+	hasJsonBody: boolean;
+	hasFormDataBody: boolean;
+	responseStatus: number | null;
 	summary: string;
 	description: string;
 }
@@ -111,28 +92,40 @@ function generateOperationFunction(operation: OperationMetadata): string {
 		path: pathTemplate,
 		pathParams,
 		hasRequestBody,
+		hasQueryParams,
+		hasJsonBody,
+		hasFormDataBody,
+		responseStatus,
 		summary,
 		description,
 	} = operation;
 
 	const httpMethod = method.toLowerCase();
+	const contractBase = toPascalCase(sanitizeIdentifier(operationId));
 
 	// Build parameter list
 	const params: string[] = [];
 
-	// Path parameters
+	// Path parameters — named contract from api.contracts.ts
 	if (pathParams.length > 0) {
-		const pathParamsType = generatePathParamsType(pathParams);
-		params.push(`pathParams: ${pathParamsType}`);
+		params.push(`pathParams: ${contractBase}PathParams`);
 	}
 
-	// Request body for POST/PUT/PATCH
+	// Request body for POST/PUT/PATCH — form-data bodies are wrapped in
+	// MapFormDataTypes because api.contracts.ts emits the raw OpenAPI schema
+	// without mapping file-like fields to `File | Blob`.
 	if (hasRequestBody) {
-		params.push(`data: RequestBody<"${pathTemplate}", "${httpMethod}">`);
+		const bodyType = hasFormDataBody && !hasJsonBody
+			? `MapFormDataTypes<${contractBase}Body>`
+			: `${contractBase}Body`;
+		params.push(`data: ${bodyType}`);
 	}
 
 	// Config parameter (always last and optional)
-	params.push(`config?: RequestConfig<"${pathTemplate}", "${httpMethod}">`);
+	const configType = hasQueryParams
+		? `RequestConfig<${contractBase}QueryParams>`
+		: `AxiosRequestConfig`;
+	params.push(`config?: ${configType}`);
 
 	// Generate JSDoc comment
 	const jsdoc: string[] = [];
@@ -149,9 +142,11 @@ function generateOperationFunction(operation: OperationMetadata): string {
 	jsdoc.push(`   * @path ${pathTemplate}`);
 	jsdoc.push("   */");
 
-	// Generate function with explicit return type - uses Result<T> for consistent error handling
+	// Generate function with explicit return type - uses Result<T> for consistent error handling.
+	// Named response contract is only emitted when a 2xx JSON response exists; otherwise fall back to unknown.
 	const functionParams = params.join(", ");
-	const returnType = `Promise<Result<ResponseData<"${pathTemplate}", "${httpMethod}">>>`;
+	const responseType = responseStatus !== null ? `${contractBase}Response` : `unknown`;
+	const returnType = `Promise<Result<${responseType}>>`;
 
 	// Build the apiClient call (apiClient methods already return Result<T>)
 	let apiCall: string;
@@ -221,8 +216,22 @@ function parseOperations(spec: unknown, logger: Logger): OperationMetadata[] {
 			// Extract path parameters
 			const pathParams = extractPathParams(pathTemplate);
 
-			// Check for request body
-			const hasRequestBody = Boolean(operation.requestBody);
+			// Check for request body content types
+			const requestBody = operation.requestBody as
+				| Record<string, unknown>
+				| undefined;
+			const hasRequestBody = Boolean(requestBody);
+			let hasJsonBody = false;
+			let hasFormDataBody = false;
+			if (requestBody) {
+				const content = requestBody.content as
+					| Record<string, unknown>
+					| undefined;
+				if (content) {
+					if (content["application/json"]) hasJsonBody = true;
+					if (content["multipart/form-data"]) hasFormDataBody = true;
+				}
+			}
 
 			// Check for query parameters
 			const parameters = operation.parameters as
@@ -231,6 +240,28 @@ function parseOperations(spec: unknown, logger: Logger): OperationMetadata[] {
 			const hasQueryParams =
 				parameters?.some((param) => param.in === "query") ?? false;
 
+			// Determine primary success response status (first 2xx with JSON content).
+			// Drives whether a named `${Base}Response` contract exists to import.
+			let responseStatus: number | null = null;
+			const responses = operation.responses as
+				| Record<string, unknown>
+				| undefined;
+			if (responses) {
+				for (const [statusKey, responseObj] of Object.entries(responses)) {
+					const statusNum = parseInt(statusKey, 10);
+					if (isNaN(statusNum)) continue;
+					if (statusNum < 200 || statusNum >= 300) continue;
+					const resp = responseObj as Record<string, unknown>;
+					const content = resp.content as
+						| Record<string, unknown>
+						| undefined;
+					if (content && content["application/json"]) {
+						responseStatus = statusNum;
+						break;
+					}
+				}
+			}
+
 			operations.push({
 				operationId: operation.operationId,
 				method,
@@ -238,6 +269,9 @@ function parseOperations(spec: unknown, logger: Logger): OperationMetadata[] {
 				pathParams,
 				hasRequestBody,
 				hasQueryParams,
+				hasJsonBody,
+				hasFormDataBody,
+				responseStatus,
 				summary: (operation.summary as string) ?? "",
 				description: (operation.description as string) ?? "",
 			});
@@ -377,9 +411,25 @@ function parseContracts(spec: unknown): ContractMetadata {
 function generateOperationsFileContent(
 	operations: OperationMetadata[]
 ): string {
+	// Collect the set of named contract types each operation references.
+	// Each entry must be gated on the same condition the contracts file uses
+	// to emit the corresponding type, or the import will dangle.
+	const contractNames = new Set<string>();
+	for (const op of operations) {
+		const base = toPascalCase(sanitizeIdentifier(op.operationId));
+		if (op.responseStatus !== null) contractNames.add(`${base}Response`);
+		if (op.hasJsonBody || op.hasFormDataBody) contractNames.add(`${base}Body`);
+		if (op.pathParams.length > 0) contractNames.add(`${base}PathParams`);
+		if (op.hasQueryParams) contractNames.add(`${base}QueryParams`);
+	}
+	const contractImport =
+		contractNames.size > 0
+			? `import type {\n  ${[...contractNames].sort().join(",\n  ")},\n} from "./api.contracts"`
+			: "";
+
 	const header = `/**
  * Auto-generated API operations from OpenAPI spec.
- * 
+ *
  * This file is automatically generated by chowbea-axios CLI.
  * DO NOT EDIT MANUALLY - your changes will be overwritten.
  *
@@ -391,35 +441,27 @@ function generateOperationsFileContent(
 /* -- Use apiClient.op.operationName() instead of raw paths -- */
 /* ~ =================================== ~ */
 
-import type { paths } from "./api.types"
 import type { AxiosRequestConfig } from "axios"
 import type { Result } from "../api.error"
+${contractImport}
 
 /* ~ =================================== ~ */
 /* -- Type Helpers -- */
 /* ~ =================================== ~ */
 
 /**
- * Extracts the operation definition for a given path and method.
- */
-type Operation<
-  P extends keyof paths,
-  M extends "get" | "post" | "put" | "delete" | "patch"
-> = paths[P][M]
-
-/**
  * Maps OpenAPI form-data field types to their runtime equivalents.
  * Uses field names to intelligently detect file upload fields vs regular string fields.
- * 
+ *
  * File field patterns: images, files, attachments, uploads, documents, photos, videos, media
  * Regular string fields: All other string/string[] fields remain unchanged
  */
 type MapFormDataTypes<T> = T extends Record<string, unknown>
   ? {
-      [K in keyof T]: 
+      [K in keyof T]:
         // Check if field name suggests it's a file upload field
-        K extends \`\${string}image\${string}\` | \`\${string}file\${string}\` | \`\${string}attachment\${string}\` | 
-                   \`\${string}upload\${string}\` | \`\${string}document\${string}\` | \`\${string}photo\${string}\` | 
+        K extends \`\${string}image\${string}\` | \`\${string}file\${string}\` | \`\${string}attachment\${string}\` |
+                   \`\${string}upload\${string}\` | \`\${string}document\${string}\` | \`\${string}photo\${string}\` |
                    \`\${string}video\${string}\` | \`\${string}media\${string}\`
           ? T[K] extends string[]
             ? File[]  // File upload fields become File[]
@@ -431,66 +473,11 @@ type MapFormDataTypes<T> = T extends Record<string, unknown>
   : T;
 
 /**
- * Extracts the request body type for a given path and method directly from OpenAPI spec.
- * Handles both JSON (application/json) and FormData (multipart/form-data) content types.
- * For form-data, maps string/string[] types to File/File[] for file upload fields.
- * Converts Record<string, never> (from generic object schemas) to Record<string, unknown>.
+ * Axios request config with typed query parameters for operations that accept them.
+ * The type parameter Q is the operation-specific QueryParams contract from api.contracts.
  */
-type RequestBody<
-  P extends keyof paths,
-  M extends "get" | "post" | "put" | "delete" | "patch"
-> = 
-  Operation<P, M> extends { requestBody: { content: { "application/json": infer T } } }
-    ? T extends Record<string, never>
-      ? Record<string, unknown>
-      : T
-    : Operation<P, M> extends { requestBody?: { content: { "application/json": infer T } } }
-    ? T extends Record<string, never>
-      ? Record<string, unknown>
-      : T
-    : Operation<P, M> extends { requestBody: { content: { "multipart/form-data": infer T } } }
-    ? MapFormDataTypes<T>
-    : Operation<P, M> extends { requestBody?: { content: { "multipart/form-data": infer T } } }
-    ? MapFormDataTypes<T>
-    : never
-
-/**
- * Extracts the response data type for a given path and method from OpenAPI spec.
- * Defaults to 200 status code response.
- */
-type ResponseData<
-  P extends keyof paths,
-  M extends "get" | "post" | "put" | "delete" | "patch"
-> = Operation<P, M> extends {
-  responses: { 200: { content: { "application/json": infer T } } }
-}
-  ? T
-  : Operation<P, M> extends {
-      responses: { 201: { content: { "application/json": infer T } } }
-    }
-  ? T
-  : unknown
-
-/**
- * Extracts query parameters for a given path and method from OpenAPI spec.
- */
-type QueryParams<
-  P extends keyof paths,
-  M extends "get" | "post" | "put" | "delete" | "patch"
-> = Operation<P, M> extends { parameters: { query?: infer Q } }
-  ? Q extends Record<string, unknown>
-    ? Q
-    : never
-  : never
-
-/**
- * Request config with typed query parameters extracted from OpenAPI spec.
- */
-type RequestConfig<
-  P extends keyof paths,
-  M extends "get" | "post" | "put" | "delete" | "patch"
-> = Omit<AxiosRequestConfig, "params"> & {
-  params?: QueryParams<P, M>
+type RequestConfig<Q> = Omit<AxiosRequestConfig, "params"> & {
+  params?: Q
 }
 
 /* ~ =================================== ~ */
