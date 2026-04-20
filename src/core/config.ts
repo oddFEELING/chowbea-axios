@@ -10,11 +10,26 @@ import toml from "toml";
 import { ConfigError, ConfigValidationError } from "./errors.js";
 
 /**
+ * Auth configuration for fetching the OpenAPI spec.
+ * Currently only supports Basic Auth.
+ */
+export interface FetchAuthConfig {
+  /** Auth type — only "basic" is supported */
+  type: "basic";
+  /** Username (supports $VAR env var interpolation) */
+  username?: string;
+  /** Password (supports $VAR env var interpolation) */
+  password?: string;
+}
+
+/**
  * Fetch configuration for remote spec retrieval.
  */
 export interface FetchConfig {
   /** Headers to include when fetching the OpenAPI spec */
   headers?: Record<string, string>;
+  /** Auth configuration for spec endpoint */
+  auth?: FetchAuthConfig;
 }
 
 /**
@@ -129,6 +144,11 @@ token_key = "${config.instance.token_key}"
 auth_mode = "${config.instance.auth_mode}"
 with_credentials = ${config.instance.with_credentials}
 timeout = ${config.instance.timeout}
+
+# [fetch.auth]
+# type = "basic"
+# username = "$SWAGGER_USER"
+# password = "$SWAGGER_PASS"
 
 [watch]
 debug = ${config.watch.debug}
@@ -338,6 +358,40 @@ function validateConfig(config: unknown): ApiConfig {
 }
 
 /**
+ * Validates the fetch auth configuration section.
+ */
+function validateFetchAuthConfig(auth: unknown): FetchAuthConfig | undefined {
+  if (auth === undefined || auth === null) {
+    return;
+  }
+
+  if (typeof auth !== "object") {
+    throw new ConfigValidationError("fetch.auth", "fetch.auth must be an object");
+  }
+
+  const authObj = auth as Record<string, unknown>;
+
+  if (typeof authObj.type !== "string" || authObj.type !== "basic") {
+    throw new ConfigValidationError(
+      "fetch.auth.type",
+      'fetch.auth.type must be "basic"'
+    );
+  }
+
+  const username =
+    typeof authObj.username === "string" && authObj.username.trim().length > 0
+      ? authObj.username
+      : undefined;
+
+  const password =
+    typeof authObj.password === "string" && authObj.password.trim().length > 0
+      ? authObj.password
+      : undefined;
+
+  return { type: "basic", username, password };
+}
+
+/**
  * Validates the fetch configuration section.
  */
 function validateFetchConfig(fetch: unknown): FetchConfig | undefined {
@@ -376,7 +430,14 @@ function validateFetchConfig(fetch: unknown): FetchConfig | undefined {
     }
   }
 
-  return headers ? { headers } : undefined;
+  // Validate auth if provided
+  const auth = validateFetchAuthConfig(fetchObj.auth);
+
+  if (!headers && !auth) {
+    return;
+  }
+
+  return { ...(headers ? { headers } : {}), ...(auth ? { auth } : {}) };
 }
 
 /**

@@ -160,6 +160,7 @@ export async function fetchOpenApiSpec(options: {
 	force?: boolean;
 	retryConfig?: RetryConfig;
 	headers?: Record<string, string>;
+	auth?: { username: string; password: string };
 }): Promise<FetchResult> {
 	const { endpoint, specPath, cachePath, logger, force = false } = options;
 	const retryConfig = options.retryConfig ?? DEFAULT_RETRY_CONFIG;
@@ -177,6 +178,20 @@ export async function fetchOpenApiSpec(options: {
 				`Failed to interpolate headers: ${error instanceof Error ? error.message : String(error)}`
 			);
 		}
+	}
+
+	// Apply Basic Auth if provided (takes precedence over any Authorization header)
+	if (options.auth) {
+		const credentials = Buffer.from(
+			`${options.auth.username}:${options.auth.password}`
+		).toString("base64");
+		// Remove any existing Authorization header (case-insensitive) to avoid duplicates
+		for (const key of Object.keys(headers)) {
+			if (key.toLowerCase() === "authorization") {
+				delete headers[key];
+			}
+		}
+		headers["Authorization"] = `Basic ${credentials}`;
 	}
 
 	// Load existing cache metadata

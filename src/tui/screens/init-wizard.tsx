@@ -138,6 +138,9 @@ function buildReplayProvider(values: WizardValues): PromptProvider {
 			// Unknown confirms -- use whatever the safe default is
 			return opts.default ?? false;
 		},
+		password: async () => {
+			return "";
+		},
 		checkbox: async (opts) => {
 			// Auto-select all available scripts for concurrent setup
 			return opts.choices.map((c) => c.value) as never;

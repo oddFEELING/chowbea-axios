@@ -162,6 +162,9 @@ function buildSetupReplayProvider(values: SetupValues): PromptProvider {
 		async confirm() {
 			return true;
 		},
+		async password() {
+			return "";
+		},
 		async checkbox() {
 			return [];
 		},
