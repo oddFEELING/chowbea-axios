@@ -8,6 +8,7 @@ import {
 	ensureOutputFolder,
 	getOutputPaths,
 	loadConfig,
+	resolveSpecSource,
 } from "../config.js";
 import { formatError, SpecNotFoundError } from "../errors.js";
 import {
@@ -144,21 +145,27 @@ export async function executeDiff(
 		let newSpec: unknown;
 		let newHash: string;
 
-		if (options.specFile) {
-			// Load from provided file
-			const result = await loadLocalSpec(options.specFile);
+		const specSource = resolveSpecSource(
+			config,
+			projectRoot,
+			options.specFile,
+		);
+
+		if (specSource.type === "local") {
+			// Load from local path (CLI flag or config.spec_file)
+			const result = await loadLocalSpec(specSource.path);
 			newSpec = result.spec;
 			newHash = computeHash(result.buffer);
-			logger.info({ spec: options.specFile }, "Loaded new spec from file");
+			logger.info({ spec: specSource.path }, "Loaded new spec from file");
 		} else {
 			// Fetch from remote
 			logger.info(
-				{ endpoint: config.api_endpoint },
+				{ endpoint: specSource.endpoint },
 				"Fetching new spec from endpoint..."
 			);
 
 			const fetchResult = await fetchOpenApiSpec({
-				endpoint: config.api_endpoint,
+				endpoint: specSource.endpoint,
 				specPath: outputPaths.spec,
 				cachePath: outputPaths.cache,
 				logger,

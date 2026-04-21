@@ -99,32 +99,33 @@ export async function executeGenerate(
 	await ensureOutputFolders(outputPaths);
 	logger.debug({ folder: outputPaths.folder }, "Output folders ready");
 
-	// Handle --spec-file flag: copy local spec to cache location
-	if (options.specFile) {
-		const specSource = resolveSpecSource(config, projectRoot, options.specFile);
-		if (specSource.type === "local") {
-			logger.info(
-				{ specFile: specSource.path },
-				"Loading local spec file...",
-			);
+	// Resolve spec source — honors both --spec-file CLI flag AND config.spec_file
+	// (priority: flag > config.spec_file > config.api_endpoint, per resolveSpecSource).
+	// For local sources, copy into the cache location so the rest of the pipeline
+	// reads from a consistent place.
+	const specSource = resolveSpecSource(config, projectRoot, options.specFile);
+	if (specSource.type === "local") {
+		logger.info(
+			{ specFile: specSource.path },
+			"Loading local spec file...",
+		);
 
-			// Load and validate the spec
-			const { buffer } = await loadLocalSpec(specSource.path);
-			const hash = computeHash(buffer);
+		// Load and validate the spec
+		const { buffer } = await loadLocalSpec(specSource.path);
+		const hash = computeHash(buffer);
 
-			// Copy to cache location
-			await writeFile(outputPaths.spec, buffer);
-			await saveCacheMetadata(outputPaths.cache, {
-				hash,
-				timestamp: Date.now(),
-				endpoint: specSource.path,
-			});
+		// Copy to cache location
+		await writeFile(outputPaths.spec, buffer);
+		await saveCacheMetadata(outputPaths.cache, {
+			hash,
+			timestamp: Date.now(),
+			endpoint: specSource.path,
+		});
 
-			logger.info(
-				{ bytes: buffer.length, hash: hash.slice(0, 8) },
-				"Spec copied to cache",
-			);
-		}
+		logger.info(
+			{ bytes: buffer.length, hash: hash.slice(0, 8) },
+			"Spec copied to cache",
+		);
 	}
 
 	// Check if local spec exists
