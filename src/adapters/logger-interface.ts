@@ -69,7 +69,11 @@ export const LOG_LEVELS: Record<LogLevel, number> = {
 
 /**
  * Determines log level from CLI flags and config.
- * Priority: quiet > verbose/debug flag > config debug > default (warn)
+ * Priority: quiet > verbose/debug flag > config debug > default (info).
+ *
+ * Default is `info` — users running the CLI without flags should see progress
+ * updates and success messages, not total silence. `warn` is only reached via
+ * the explicit `--quiet`-adjacent path and via `silent`/error handling.
  */
 export function getLogLevel(
 	flags: {
@@ -81,7 +85,7 @@ export function getLogLevel(
 ): LogLevel {
 	if (flags.quiet) return "error";
 	if (flags.verbose || flags.debug || configDebug) return "debug";
-	return "warn";
+	return "info";
 }
 
 /**
