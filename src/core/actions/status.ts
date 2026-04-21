@@ -43,7 +43,10 @@ export type FileStatus = Record<string, { exists: boolean; modifiedAgo?: string 
 export interface StatusResult {
 	configPath: string;
 	wasCreated: boolean;
+	/** Remote URL or local spec file path — whichever is configured. */
 	endpoint: string;
+	/** True when `endpoint` is a local spec_file path rather than a remote URL. */
+	isLocalSpec: boolean;
 	outputFolder: string;
 	cacheMetadata: CacheMetadata | null;
 	specExists: boolean;
@@ -164,10 +167,17 @@ export async function executeStatus(
 			: null;
 		const fileStatus = await checkGeneratedFiles(outputPaths);
 
+		// Resolve displayed source: prefer local spec_file when set, else api_endpoint.
+		const isLocalSpec = Boolean(config.spec_file);
+		const endpoint = isLocalSpec
+			? (config.spec_file as string)
+			: (config.api_endpoint ?? "");
+
 		return {
 			configPath: path.relative(projectRoot, configPath),
 			wasCreated,
-			endpoint: config.api_endpoint,
+			endpoint,
+			isLocalSpec,
 			outputFolder: config.output.folder,
 			cacheMetadata,
 			specExists,

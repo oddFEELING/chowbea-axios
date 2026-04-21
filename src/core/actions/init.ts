@@ -201,11 +201,19 @@ export async function hasFile(
  * Creates api.config.toml if it doesn't exist or if user confirms overwrite.
  * Returns true when the file was (over)written.
  */
+/**
+ * Returns true if the given string looks like a remote URL (has a
+ * http/https/ftp scheme). Otherwise it's treated as a local file path.
+ */
+function isRemoteSpecUrl(value: string): boolean {
+  return /^(https?|ftp):\/\//i.test(value.trim());
+}
+
 async function setupConfig(
   projectRoot: string,
   force: boolean,
   instanceConfig: InstanceConfig,
-  apiEndpoint: string,
+  specSource: { kind: "remote"; endpoint: string } | { kind: "local"; specFile: string },
   outputFolder: string,
   logger: Logger,
   prompts: PromptProvider,
@@ -232,7 +240,10 @@ async function setupConfig(
   }
 
   const configContent = generateConfigTemplate({
-    api_endpoint: apiEndpoint,
+    api_endpoint:
+      specSource.kind === "remote" ? specSource.endpoint : undefined,
+    spec_file:
+      specSource.kind === "local" ? specSource.specFile : undefined,
     poll_interval_ms: 10_000,
     output: { folder: outputFolder },
     instance: instanceConfig,
@@ -1002,13 +1013,22 @@ export async function executeInit(
     }
   }
 
-  // Prompt for API endpoint URL
-  const apiEndpoint = await prompts.input({
-    message: "Enter your OpenAPI spec endpoint URL:",
+  // Prompt for spec source — accepts either a remote URL or a local file path.
+  // The answer is auto-classified by shape: http(s)://... → remote endpoint;
+  // anything else → local file path (spec_file in config).
+  const specInput = await prompts.input({
+    message:
+      "Enter your OpenAPI spec URL (http://...) or local file path (./openapi.json):",
     default: DEFAULT_CONFIG.api_endpoint,
     validate: (value) =>
-      value.trim().length > 0 ? true : "API endpoint URL is required",
+      value.trim().length > 0
+        ? true
+        : "A spec URL or local file path is required",
   });
+  const specSource: { kind: "remote"; endpoint: string } | { kind: "local"; specFile: string } =
+    isRemoteSpecUrl(specInput)
+      ? { kind: "remote", endpoint: specInput.trim() }
+      : { kind: "local", specFile: specInput.trim() };
 
   // Prompt for output folder location
   const outputFolder = await prompts.input({
@@ -1089,7 +1109,7 @@ export async function executeInit(
     projectRoot,
     options.force,
     instanceConfig,
-    apiEndpoint,
+    specSource,
     outputFolder,
     logger,
     prompts,
@@ -1183,9 +1203,14 @@ export async function executeInit(
   // Step 6: Ensure _internal/ is in .gitignore
   await ensureGitignoreEntries(projectRoot, logger);
 
-  // Step 7: Run initial fetch (if not localhost default)
+  // Step 7: Run initial fetch.
+  // - Local spec_file: always safe to read, always run.
+  // - Remote localhost: skip (user's dev server may not be running yet).
+  // - Remote non-localhost: run.
   const isLocalhost =
-    apiEndpoint.includes("localhost") || apiEndpoint.includes("127.0.0.1");
+    specSource.kind === "remote" &&
+    (specSource.endpoint.includes("localhost") ||
+      specSource.endpoint.includes("127.0.0.1"));
   let initialFetchSuccess: boolean | null = null;
   if (!isLocalhost) {
     initialFetchSuccess = await runInitialFetch(projectRoot, pm, logger);

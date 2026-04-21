@@ -70,8 +70,8 @@ export interface InstanceConfig {
  * Configuration structure for api.config.toml
  */
 export interface ApiConfig {
-  /** Remote OpenAPI spec endpoint URL */
-  api_endpoint: string;
+  /** Remote OpenAPI spec endpoint URL. Optional when `spec_file` is set. */
+  api_endpoint?: string;
   /** Local spec file path (takes priority over api_endpoint if set) */
   spec_file?: string;
   /** Polling interval in milliseconds for watch mode */
@@ -128,10 +128,17 @@ export const DEFAULT_CONFIG: ApiConfig = {
  * Single source of truth — used by both auto-create and init command.
  */
 export function generateConfigTemplate(config: ApiConfig): string {
+  // Emit whichever spec source is configured as the active line, and the
+  // other as a commented-out example.
+  const specSourceBlock = config.spec_file
+    ? `# api_endpoint = "${config.api_endpoint ?? "https://api.example.com/openapi.json"}"  # Use remote endpoint instead of local file
+spec_file = "${config.spec_file}"`
+    : `api_endpoint = "${config.api_endpoint}"
+# spec_file = "./openapi.json"  # Use local file instead of remote`;
+
   return `# Chowbea Axios Configuration
 
-api_endpoint = "${config.api_endpoint}"
-# spec_file = "./openapi.json"  # Use local file instead of remote
+${specSourceBlock}
 poll_interval_ms = ${config.poll_interval_ms}
 
 [output]
@@ -296,14 +303,25 @@ function validateConfig(config: unknown): ApiConfig {
 
   const cfg = config as Record<string, unknown>;
 
-  // Validate api_endpoint
-  if (
-    typeof cfg.api_endpoint !== "string" ||
-    cfg.api_endpoint.trim().length === 0
-  ) {
+  // Validate spec source: at least one of api_endpoint or spec_file must be set.
+  // spec_file takes priority at resolve time (see resolveSpecSource), so
+  // api_endpoint is only required when spec_file is absent.
+  const hasSpecFile =
+    typeof cfg.spec_file === "string" && cfg.spec_file.trim().length > 0;
+  const hasApiEndpoint =
+    typeof cfg.api_endpoint === "string" &&
+    cfg.api_endpoint.trim().length > 0;
+
+  if (!hasSpecFile && !hasApiEndpoint) {
     throw new ConfigValidationError(
       "api_endpoint",
-      "api_endpoint must be a non-empty string URL"
+      "Configuration must set either api_endpoint (remote URL) or spec_file (local path)"
+    );
+  }
+  if (cfg.api_endpoint !== undefined && !hasApiEndpoint) {
+    throw new ConfigValidationError(
+      "api_endpoint",
+      "api_endpoint must be a non-empty string URL when provided"
     );
   }
 
@@ -345,7 +363,7 @@ function validateConfig(config: unknown): ApiConfig {
   const watch = validateWatchConfig(cfg.watch);
 
   return {
-    api_endpoint: cfg.api_endpoint,
+    api_endpoint: hasApiEndpoint ? (cfg.api_endpoint as string) : undefined,
     spec_file,
     poll_interval_ms: cfg.poll_interval_ms,
     output: {
@@ -472,7 +490,13 @@ export function resolveSpecSource(
     return { type: "local", path: resolvedPath };
   }
 
-  // Default to remote endpoint
+  // Default to remote endpoint. Validator guarantees api_endpoint is present
+  // whenever spec_file is absent, but we guard here for defense-in-depth.
+  if (!config.api_endpoint) {
+    throw new Error(
+      "No spec source configured: set either api_endpoint or spec_file in api.config.toml"
+    );
+  }
   return { type: "remote", endpoint: config.api_endpoint };
 }
 

@@ -83,9 +83,19 @@ const STEPS = [
 // Helper: build TOML preview from wizard values
 // ---------------------------------------------------------------------------
 
+/**
+ * True if the input looks like a remote URL (has an http/https/ftp scheme).
+ * Otherwise it's treated as a local file path (spec_file in config).
+ */
+function isRemoteSpecUrl(value: string): boolean {
+	return /^(https?|ftp):\/\//i.test(value.trim());
+}
+
 function buildPreviewConfig(values: WizardValues): string {
+	const isRemote = isRemoteSpecUrl(values.endpoint);
 	const config: ApiConfig = {
-		api_endpoint: values.endpoint,
+		api_endpoint: isRemote ? values.endpoint : undefined,
+		spec_file: isRemote ? undefined : values.endpoint,
 		poll_interval_ms: DEFAULT_CONFIG.poll_interval_ms,
 		output: { folder: values.outputFolder },
 		instance: {
@@ -104,7 +114,14 @@ function buildPreviewConfig(values: WizardValues): string {
 function buildReplayProvider(values: WizardValues): PromptProvider {
 	return {
 		input: async (opts) => {
-			if (opts.message.includes("endpoint")) return values.endpoint;
+			// Match both the legacy "endpoint" prompt and the new
+			// "spec URL or local file path" prompt used by init.ts.
+			if (
+				opts.message.includes("endpoint") ||
+				opts.message.includes("spec URL") ||
+				opts.message.includes("OpenAPI spec")
+			)
+				return values.endpoint;
 			if (
 				opts.message.includes("placed") ||
 				opts.message.includes("folder")
@@ -229,7 +246,7 @@ function WizardMode({ onComplete, setInputMode }: WizardModeProps) {
 	// Wizard state
 	const [step, setStep] = useState(0);
 	const [values, setValues] = useState<WizardValues>({
-		endpoint: DEFAULT_CONFIG.api_endpoint,
+		endpoint: DEFAULT_CONFIG.api_endpoint ?? "",
 		outputFolder: DEFAULT_CONFIG.output.folder,
 		pm: "npm", // updated by auto-detection below
 		authMode: "custom",
@@ -423,7 +440,7 @@ function WizardMode({ onComplete, setInputMode }: WizardModeProps) {
 	const handleEndpointSubmit = useCallback(
 		(valOrEvent: unknown) => {
 			const val = typeof valOrEvent === "string" ? valOrEvent : "";
-			const trimmed = val.trim() || DEFAULT_CONFIG.api_endpoint;
+			const trimmed = val.trim() || DEFAULT_CONFIG.api_endpoint || "";
 			setValues((v) => ({ ...v, endpoint: trimmed }));
 			setEndpointDraft(trimmed);
 			setStep(1);
@@ -480,12 +497,12 @@ function WizardMode({ onComplete, setInputMode }: WizardModeProps) {
 				</text>
 			</box>
 
-			{/* Step 0: API Endpoint */}
+			{/* Step 0: API Endpoint or Local File */}
 			{phase === "wizard" && step === 0 && (
 				<box flexDirection="column" gap={1} paddingX={1}>
-					<text fg={colors.accent}>{"API Endpoint"}</text>
+					<text fg={colors.accent}>{"OpenAPI Spec Source"}</text>
 					<text fg={colors.fgDim}>
-						{"Enter the URL to your OpenAPI spec (JSON or YAML)"}
+						{"URL (http://…/openapi.json) or local file path (./openapi.json)"}
 					</text>
 					<input
 						placeholder={DEFAULT_CONFIG.api_endpoint}

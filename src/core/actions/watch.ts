@@ -12,8 +12,16 @@ import {
 	ensureOutputFolders,
 	getOutputPaths,
 	loadConfig,
+	resolveSpecSource,
+	type SpecSource,
 } from "../config.js";
-import { fetchOpenApiSpec, saveSpec } from "../fetcher.js";
+import {
+	computeHash,
+	fetchOpenApiSpec,
+	loadCacheMetadata,
+	loadLocalSpec,
+	saveSpec,
+} from "../fetcher.js";
 import { generate, generateClientFiles } from "../generator.js";
 
 /**
@@ -120,17 +128,19 @@ export async function executeWatch(
 		logger,
 	});
 
-	// Determine polling interval
+	// Determine polling interval and spec source (local file or remote endpoint)
 	const intervalMs = options.intervalMs ?? config.poll_interval_ms;
-	const endpoint = config.api_endpoint;
+	const specSource = resolveSpecSource(config, projectRoot);
+	const sourceLabel =
+		specSource.type === "local" ? specSource.path : specSource.endpoint;
 
 	// Announce the watch loop at info level so the user knows what's being
 	// polled and at what cadence. In debug mode the full context also fires.
 	logger.step(
 		"watch",
-		`Polling every ${formatDuration(intervalMs)} — ${endpoint}`,
+		`Polling every ${formatDuration(intervalMs)} — ${sourceLabel}`,
 	);
-	logger.debug({ endpoint, intervalMs }, "config");
+	logger.debug({ specSource, intervalMs }, "config");
 
 	let cycleCounter = 0;
 	const signal = options.signal;
@@ -142,7 +152,7 @@ export async function executeWatch(
 
 		await runCycle({
 			cycleId,
-			endpoint,
+			specSource,
 			outputPaths,
 			logger,
 			headers: config.fetch?.headers,
@@ -162,17 +172,19 @@ export async function executeWatch(
 }
 
 /**
- * Runs a single watch cycle - fetch, check for changes, regenerate if needed.
+ * Runs a single watch cycle - load (fetch or read) the spec, check for changes,
+ * regenerate if needed.
  */
 async function runCycle(options: {
 	cycleId: number;
-	endpoint: string;
+	specSource: SpecSource;
 	outputPaths: ReturnType<typeof getOutputPaths>;
 	logger: Logger;
 	headers?: Record<string, string>;
 	callbacks?: WatchCallbacks;
 }): Promise<void> {
-	const { cycleId, endpoint, outputPaths, logger, headers, callbacks } = options;
+	const { cycleId, specSource, outputPaths, logger, headers, callbacks } =
+		options;
 	const startTime = Date.now();
 
 	// Notify cycle start
@@ -184,26 +196,50 @@ async function runCycle(options: {
 	}
 
 	try {
-		// Fetch the spec with retry logic (debug level - only shown with --debug)
-		logger.debug({ cycleId, endpoint }, "Checking for API changes...");
+		let newBuffer: Buffer;
+		let newHash: string;
+		let sourceIdentifier: string;
+		let hasChanged: boolean;
 
-		const fetchResult = await fetchOpenApiSpec({
-			endpoint,
-			specPath: outputPaths.spec,
-			cachePath: outputPaths.cache,
-			logger,
-			force: false,
-			headers,
-		});
+		if (specSource.type === "local") {
+			// Local file mode — hash file contents and compare against cache
+			sourceIdentifier = specSource.path;
+			logger.debug({ cycleId, path: specSource.path }, "Checking local spec...");
+			const { buffer } = await loadLocalSpec(specSource.path);
+			newBuffer = buffer;
+			newHash = computeHash(buffer);
 
-		// Handle network fallback
-		if (fetchResult.fromCache) {
-			logger.warn({ cycleId }, "Using cached spec due to network issues");
+			// Compare against previously-saved spec hash
+			const existingCache = await loadCacheMetadata(outputPaths.cache);
+			hasChanged = existingCache?.hash !== newHash;
+		} else {
+			// Remote mode — fetch with retry
+			sourceIdentifier = specSource.endpoint;
+			logger.debug(
+				{ cycleId, endpoint: specSource.endpoint },
+				"Checking for API changes...",
+			);
+			const fetchResult = await fetchOpenApiSpec({
+				endpoint: specSource.endpoint,
+				specPath: outputPaths.spec,
+				cachePath: outputPaths.cache,
+				logger,
+				force: false,
+				headers,
+			});
+
+			if (fetchResult.fromCache) {
+				logger.warn({ cycleId }, "Using cached spec due to network issues");
+			}
+
+			newBuffer = fetchResult.buffer;
+			newHash = fetchResult.hash;
+			hasChanged = fetchResult.hasChanged;
 		}
 
 		// Heartbeat: one line per cycle so watch mode isn't silent when
 		// nothing changes. Compact format so it's tolerable at any interval.
-		if (!fetchResult.hasChanged) {
+		if (!hasChanged) {
 			const durationMs = Date.now() - startTime;
 			logger.info(
 				{ cycle: cycleId, duration: formatDuration(durationMs) },
@@ -215,15 +251,15 @@ async function runCycle(options: {
 
 		// Save the new spec
 		await saveSpec({
-			buffer: fetchResult.buffer,
-			hash: fetchResult.hash,
-			endpoint,
+			buffer: newBuffer,
+			hash: newHash,
+			endpoint: sourceIdentifier,
 			specPath: outputPaths.spec,
 			cachePath: outputPaths.cache,
 		});
 
 		logger.info(
-			{ cycleId, bytes: fetchResult.buffer.length },
+			{ cycleId, bytes: newBuffer.length },
 			"New spec detected, regenerating...",
 		);
 

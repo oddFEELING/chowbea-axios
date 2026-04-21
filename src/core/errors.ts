@@ -84,7 +84,7 @@ export class SpecNotFoundError extends ChowbeaAxiosError {
 		super(
 			`OpenAPI spec not found at: ${specPath}`,
 			"SPEC_NOT_FOUND",
-			"Run 'chowbea-axios fetch' to download the spec from the remote endpoint."
+			"Run 'chowbea-axios fetch' to load the spec (from api_endpoint or spec_file in api.config.toml)."
 		);
 		this.name = "SpecNotFoundError";
 		this.specPath = specPath;
