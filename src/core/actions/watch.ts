@@ -124,7 +124,12 @@ export async function executeWatch(
 	const intervalMs = options.intervalMs ?? config.poll_interval_ms;
 	const endpoint = config.api_endpoint;
 
-	logger.step("watch", "Starting watch mode...");
+	// Announce the watch loop at info level so the user knows what's being
+	// polled and at what cadence. In debug mode the full context also fires.
+	logger.step(
+		"watch",
+		`Polling every ${formatDuration(intervalMs)} — ${endpoint}`,
+	);
 	logger.debug({ endpoint, intervalMs }, "config");
 
 	let cycleCounter = 0;
@@ -196,12 +201,13 @@ async function runCycle(options: {
 			logger.warn({ cycleId }, "Using cached spec due to network issues");
 		}
 
-		// Skip if unchanged (debug level - only shown with --debug)
+		// Heartbeat: one line per cycle so watch mode isn't silent when
+		// nothing changes. Compact format so it's tolerable at any interval.
 		if (!fetchResult.hasChanged) {
 			const durationMs = Date.now() - startTime;
-			logger.debug(
-				{ cycleId, durationMs: formatDuration(durationMs) },
-				"No changes detected, skipping generation",
+			logger.info(
+				{ cycle: cycleId, duration: formatDuration(durationMs) },
+				"no changes",
 			);
 			callbacks?.onCycleComplete?.(cycleId, false, durationMs);
 			return;
