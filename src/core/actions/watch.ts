@@ -131,8 +131,15 @@ export async function executeWatch(
 	// Determine polling interval and spec source (local file or remote endpoint)
 	const intervalMs = options.intervalMs ?? config.poll_interval_ms;
 	const specSource = resolveSpecSource(config, projectRoot);
+	const sourceLabel =
+		specSource.type === "local" ? specSource.path : specSource.endpoint;
 
-	logger.step("watch", "Starting watch mode...");
+	// Announce the watch loop at info level so the user knows what's being
+	// polled and at what cadence. In debug mode the full context also fires.
+	logger.step(
+		"watch",
+		`Polling every ${formatDuration(intervalMs)} — ${sourceLabel}`,
+	);
 	logger.debug({ specSource, intervalMs }, "config");
 
 	let cycleCounter = 0;
@@ -230,12 +237,13 @@ async function runCycle(options: {
 			hasChanged = fetchResult.hasChanged;
 		}
 
-		// Skip if unchanged (debug level - only shown with --debug)
+		// Heartbeat: one line per cycle so watch mode isn't silent when
+		// nothing changes. Compact format so it's tolerable at any interval.
 		if (!hasChanged) {
 			const durationMs = Date.now() - startTime;
-			logger.debug(
-				{ cycleId, durationMs: formatDuration(durationMs) },
-				"No changes detected, skipping generation",
+			logger.info(
+				{ cycle: cycleId, duration: formatDuration(durationMs) },
+				"no changes",
 			);
 			callbacks?.onCycleComplete?.(cycleId, false, durationMs);
 			return;
