@@ -532,6 +532,15 @@ function sanitizeIdentifier(name: string): string {
 }
 
 /**
+ * Formats a property name for use as an object-type key. Preserves the original
+ * name when it's a valid unquoted TS identifier; otherwise wraps it in quotes so
+ * names like `hub.mode`, `X-Custom-Header`, or `0.5` remain syntactically valid.
+ */
+function formatPropertyKey(name: string): string {
+	return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(name) ? name : JSON.stringify(name);
+}
+
+/**
  * Capitalizes the first letter of a string (for PascalCase conversion from camelCase operationIds).
  */
 function toPascalCase(str: string): string {
@@ -616,7 +625,7 @@ function schemaToTS(
 			const optional = required.has(key) ? "" : "?";
 			const propType = schemaToTS(propSchema, innerIndent, allSchemas, visited);
 			const desc = propSchema.description ? ` /** ${propSchema.description} */\n${innerIndent}` : "";
-			return `${desc}${key}${optional}: ${propType};`;
+			return `${desc}${formatPropertyKey(key)}${optional}: ${propType};`;
 		});
 		return `{\n${innerIndent}${props.join(`\n${innerIndent}`)}\n${indent}}`;
 	}
@@ -740,7 +749,7 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 						if (propSchema.description) {
 							lines.push(`\t/** ${propSchema.description} */`);
 						}
-						lines.push(`\t${propKey}${optional}: ${propType};`);
+						lines.push(`\t${formatPropertyKey(propKey)}${optional}: ${propType};`);
 					}
 					lines.push(`}`);
 				} else {
