@@ -80,6 +80,42 @@ export function refName(ref: string): string {
 }
 
 // ---------------------------------------------------------------------------
+// Media type helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Picks the first usable JSON-ish entry from an OpenAPI `content` map,
+ * preserving spec-author intent via priority order:
+ *   1. Exact `application/json`
+ *   2. Any variant containing `json` (e.g. `application/vnd.api+json`,
+ *      `application/problem+json`, `application/json; charset=utf-8`)
+ *   3. Wildcard `*\/*` as a last resort — common in Swagger-generated specs
+ *      where the backend annotates success responses without a concrete media type
+ */
+export function pickJsonContent(
+	content: Record<string, unknown> | undefined,
+): { mediaType: string; entry: Record<string, unknown> } | null {
+	if (!content) return null;
+	const direct = content["application/json"];
+	if (direct && typeof direct === "object") {
+		return { mediaType: "application/json", entry: direct as Record<string, unknown> };
+	}
+	for (const key of Object.keys(content)) {
+		if (/json/i.test(key)) {
+			const entry = content[key];
+			if (entry && typeof entry === "object") {
+				return { mediaType: key, entry: entry as Record<string, unknown> };
+			}
+		}
+	}
+	const wildcard = content["*/*"];
+	if (wildcard && typeof wildcard === "object") {
+		return { mediaType: "*/*", entry: wildcard as Record<string, unknown> };
+	}
+	return null;
+}
+
+// ---------------------------------------------------------------------------
 // Schema resolution
 // ---------------------------------------------------------------------------
 

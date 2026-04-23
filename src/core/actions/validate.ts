@@ -15,6 +15,7 @@ import {
 	resolveRef,
 	resolveObject,
 	resolveSchema,
+	pickJsonContent,
 	MAX_SCHEMA_DEPTH,
 } from "../ref-utils.js";
 
@@ -430,9 +431,8 @@ function validateResponses(spec: Record<string, unknown>): CategoryResult {
 					spec,
 				);
 				const content = resp.content as Record<string, unknown> | undefined;
-				if (!content) return false;
-				const json = content["application/json"] as Record<string, unknown> | undefined;
-				return json?.schema !== undefined;
+				const picked = pickJsonContent(content);
+				return picked?.entry?.schema !== undefined;
 			});
 
 			if (!hasJsonSchema) {
@@ -443,7 +443,7 @@ function validateResponses(spec: Record<string, unknown>): CategoryResult {
 					path: opPath,
 					message: streaming
 						? "SSE endpoint — no JSON response schema expected"
-						: "No 2xx response has application/json schema — type generation will produce empty types",
+						: "No 2xx response has a JSON-compatible schema — type generation will produce empty types",
 				});
 			}
 		}
@@ -469,8 +469,8 @@ function validateTypeQuality(spec: Record<string, unknown>): CategoryResult {
 					spec,
 				);
 				const content = resp.content as Record<string, unknown> | undefined;
-				const json = content?.["application/json"] as Record<string, unknown> | undefined;
-				const rawSchema = json?.schema;
+				const picked = pickJsonContent(content);
+				const rawSchema = picked?.entry?.schema;
 
 				if (!rawSchema) continue;
 
@@ -522,9 +522,9 @@ function validateTypeQuality(spec: Record<string, unknown>): CategoryResult {
 			);
 			const content = reqBody.content as Record<string, unknown> | undefined;
 			if (content) {
-				const json = content["application/json"] as Record<string, unknown> | undefined;
+				const picked = pickJsonContent(content);
 				const formData = content["multipart/form-data"] as Record<string, unknown> | undefined;
-				const bodyMedia = json ?? formData;
+				const bodyMedia = picked?.entry ?? formData;
 
 				if (bodyMedia) {
 					const rawSchema = bodyMedia.schema;

@@ -17,6 +17,7 @@ import type { InstanceConfig, OutputPaths } from "./config.js";
 import { GenerationError } from "./errors.js";
 import type { Logger } from "../adapters/logger-interface.js";
 import { detectPackageManager, getDlxCommand } from "./pm.js";
+import { pickJsonContent } from "./ref-utils.js";
 
 /**
  * Output paths for generated files.
@@ -228,7 +229,9 @@ function parseOperations(spec: unknown, logger: Logger): OperationMetadata[] {
 					| Record<string, unknown>
 					| undefined;
 				if (content) {
-					if (content["application/json"]) hasJsonBody = true;
+					// Accepts exact `application/json`, json-variant media types, and `*\/*`
+					// as a fallback so Swagger-generated specs type correctly.
+					if (pickJsonContent(content)) hasJsonBody = true;
 					if (content["multipart/form-data"]) hasFormDataBody = true;
 				}
 			}
@@ -255,7 +258,7 @@ function parseOperations(spec: unknown, logger: Logger): OperationMetadata[] {
 					const content = resp.content as
 						| Record<string, unknown>
 						| undefined;
-					if (content && content["application/json"]) {
+					if (pickJsonContent(content)) {
 						responseStatus = statusNum;
 						break;
 					}
@@ -354,7 +357,7 @@ function parseContracts(spec: unknown): ContractMetadata {
 					if (isNaN(statusNum)) continue;
 					const resp = responseObj as Record<string, unknown>;
 					const content = resp.content as Record<string, unknown> | undefined;
-					const hasJsonContent = !!(content && content["application/json"]);
+					const hasJsonContent = !!pickJsonContent(content);
 					const description = typeof resp.description === "string" ? resp.description : "";
 					allResponses.push({ status: statusNum, description, hasJsonContent });
 
@@ -374,7 +377,7 @@ function parseContracts(spec: unknown): ContractMetadata {
 			if (requestBody) {
 				const content = requestBody.content as Record<string, unknown> | undefined;
 				if (content) {
-					if (content["application/json"]) hasJsonBody = true;
+					if (pickJsonContent(content)) hasJsonBody = true;
 					if (content["multipart/form-data"]) hasFormDataBody = true;
 				}
 			}
@@ -657,14 +660,21 @@ function resolveOperationSchema(
 			if (kind === "response" && responseStatus != null) {
 				const responses = op.responses as Record<string, Record<string, unknown>> | undefined;
 				const resp = responses?.[String(responseStatus)];
-				const content = resp?.content as Record<string, Record<string, unknown>> | undefined;
-				return (content?.["application/json"]?.schema as Record<string, unknown>) ?? null;
+				const content = resp?.content as Record<string, unknown> | undefined;
+				const picked = pickJsonContent(content);
+				return (picked?.entry?.schema as Record<string, unknown>) ?? null;
 			}
 
 			if (kind === "requestBody") {
 				const rb = op.requestBody as Record<string, unknown> | undefined;
 				const content = rb?.content as Record<string, Record<string, unknown>> | undefined;
 				const ct = contentType ?? "application/json";
+				// For JSON-ish body lookups, fall back through the media-type priority
+				// so specs using `*\/*` or `application/vnd.api+json` still resolve.
+				if (ct === "application/json") {
+					const picked = pickJsonContent(content as Record<string, unknown> | undefined);
+					return (picked?.entry?.schema as Record<string, unknown>) ?? null;
+				}
 				return (content?.[ct]?.schema as Record<string, unknown>) ?? null;
 			}
 
