@@ -4,12 +4,27 @@ node_modules/
 # Build output
 dist/
 
-# oclif manifest (generated during build)
-oclif.manifest.json
+# Lockfiles — package-lock.json is canonical for this repo (npm ships
+# with every Node install; the CI template uses `npm ci`). Bun, yarn,
+# pnpm contributors can still install locally; their lockfiles are
+# gitignored to prevent resolver drift. Issue #36.
+bun.lock
+bun.lockb
+yarn.lock
+pnpm-lock.yaml
 
 # Logs
 *.log
 npm-debug.log*
+
+# Env files (env-manager writes these during local testing)
+.env
+.env.local
+.env.*.local
+
+# Generated client output (when running the package against itself)
+services/api/
+**/_generated/
 
 # OS files
 .DS_Store

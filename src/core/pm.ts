@@ -15,6 +15,11 @@ export type PackageManager = "pnpm" | "yarn" | "bun" | "npm";
 /**
  * Detects the package manager based on lockfile presence.
  * Checks in order: pnpm, yarn, bun, npm. Defaults to npm if none found.
+ *
+ * Both `bun.lock` (text format, the modern Bun default since v1.1.27)
+ * and `bun.lockb` (binary format, legacy) are detected — the previous
+ * implementation only checked the binary form and misdetected modern
+ * Bun-managed projects as npm. Issue #24.
  */
 export async function detectPackageManager(
 	projectRoot: string
@@ -22,7 +27,8 @@ export async function detectPackageManager(
 	const lockfiles: [string, PackageManager][] = [
 		["pnpm-lock.yaml", "pnpm"],
 		["yarn.lock", "yarn"],
-		["bun.lockb", "bun"],
+		["bun.lock", "bun"],   // text format (modern)
+		["bun.lockb", "bun"],  // binary format (legacy)
 		["package-lock.json", "npm"],
 	];
 
