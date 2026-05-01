@@ -275,14 +275,108 @@ describe("generator: known-bug regression markers", () => {
 		}
 	});
 
-	it.fails("#31: HEAD method operations should appear in api.operations.ts", async () => {
-		const spec = await loadFixture("edge-cases.json");
-		const { operations, cleanup } = await runGenerator(spec);
+	it.fails(
+		"#31 (FOLLOW-UP): HEAD operations should be emitted in api.operations.ts (requires runtime-client support)",
+		async () => {
+			// PR6 covers HEAD/OPTIONS/TRACE in discovery (status, diff, validate,
+			// inspect) but does NOT yet emit them in api.operations.ts because
+			// the runtime client (api.client.ts) only exposes the 5 generatable
+			// methods. Emitting HEAD/OPTIONS/TRACE requires either adding
+			// methods to the runtime client or routing through axios's
+			// `request()` API — out of scope for #31's discovery sweep, tracked
+			// as a follow-up.
+			const spec = await loadFixture("edge-cases.json");
+			const { operations, cleanup } = await runGenerator(spec);
+			try {
+				expect(operations).toMatch(/head-user/);
+			} finally {
+				await cleanup();
+			}
+		},
+	);
+
+	it("#31 (PARTIAL FIX): generator skips unsupported methods with a warning instead of silently dropping them", async () => {
+		// Capture warnings emitted during generation. Use a captured-logger
+		// shape so the test doesn't depend on console transport.
+		const warnings: Array<{ ctx: unknown; msg: string }> = [];
+		const captureLogger = {
+			level: "info" as const,
+			header: () => {},
+			step: () => {},
+			info: (() => {}) as never,
+			warn: ((ctx: unknown, msg?: string) => {
+				if (typeof ctx === "string") warnings.push({ ctx: undefined, msg: ctx });
+				else warnings.push({ ctx, msg: msg ?? "" });
+			}) as never,
+			error: (() => {}) as never,
+			debug: (() => {}) as never,
+			done: () => {},
+			startProgress: () => {},
+			stopProgress: () => {},
+		};
+
+		const { mkdir, writeFile, rm } = await import("node:fs/promises");
+		const { tmpdir } = await import("node:os");
+		const { join } = await import("node:path");
+		const { generate } = await import("../src/core/generator.js");
+
+		const root = join(tmpdir(), `chowbea-pr6-test-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		const internal = join(root, "_internal");
+		const generated = join(root, "_generated");
+		await mkdir(internal, { recursive: true });
+		await mkdir(generated, { recursive: true });
+
+		const spec = {
+			openapi: "3.0.3",
+			info: { title: "X", version: "1.0.0" },
+			paths: {
+				"/users/{id}": {
+					get: {
+						operationId: "get-user",
+						parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+						responses: { "200": { description: "OK" } },
+					},
+					head: {
+						operationId: "head-user",
+						parameters: [{ name: "id", in: "path", required: true, schema: { type: "string" } }],
+						responses: { "200": { description: "OK" } },
+					},
+				},
+			},
+		};
+
+		await writeFile(join(internal, "openapi.json"), JSON.stringify(spec), "utf8");
+
 		try {
-			// `head-user` operation should be emitted alongside get/patch.
-			expect(operations).toMatch(/head-user/);
+			await generate({
+				paths: {
+					folder: root,
+					internal,
+					generated,
+					spec: join(internal, "openapi.json"),
+					cache: join(internal, ".api-cache.json"),
+					types: join(generated, "api.types.ts"),
+					operations: join(generated, "api.operations.ts"),
+					contracts: join(generated, "api.contracts.ts"),
+					helpers: join(root, "api.helpers.ts"),
+					instance: join(root, "api.instance.ts"),
+					error: join(root, "api.error.ts"),
+					client: join(root, "api.client.ts"),
+				},
+				logger: captureLogger,
+				skipTypes: true,
+			});
+
+			// HEAD on `/users/{id}` triggered a warning naming the operationId
+			// and method, so users know it was deliberately dropped.
+			const headWarning = warnings.find((w) => {
+				const ctx = w.ctx as Record<string, unknown> | undefined;
+				return ctx?.method === "HEAD" && ctx?.operationId === "head-user";
+			});
+			expect(headWarning).toBeDefined();
+			expect(headWarning?.msg).toMatch(/not yet supported/i);
 		} finally {
-			await cleanup();
+			await rm(root, { recursive: true, force: true });
 		}
 	});
 

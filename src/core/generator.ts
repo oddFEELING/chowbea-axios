@@ -16,6 +16,11 @@ import { findProjectRoot } from "./config.js";
 import type { InstanceConfig, OutputPaths } from "./config.js";
 import { GenerationError } from "./errors.js";
 import type { Logger } from "../adapters/logger-interface.js";
+import {
+	GENERATABLE_HTTP_METHODS,
+	HTTP_METHODS,
+	isGeneratableMethod,
+} from "./http-methods.js";
 import { detectPackageManager, getDlxCommand, resolveCommand } from "./pm.js";
 import { pickJsonContent } from "./ref-utils.js";
 
@@ -208,11 +213,31 @@ function parseOperations(spec: unknown, logger: Logger): OperationMetadata[] {
 
 	// Iterate through all paths
 	for (const [pathTemplate, pathItem] of Object.entries(paths)) {
-		// Iterate through all HTTP methods
-		for (const method of ["get", "post", "put", "delete", "patch"]) {
+		// Walk every HTTP method on this path. Methods that aren't yet
+		// supported by the runtime client (OPTIONS/HEAD/TRACE) are still
+		// inspected so we can warn the user, but the operations file only
+		// emits entries for `GENERATABLE_HTTP_METHODS`. Issue #31.
+		for (const method of HTTP_METHODS) {
 			const operation = pathItem[method] as Record<string, unknown> | undefined;
 
 			if (!operation) continue;
+
+			// Skip operations whose method isn't generatable today, with a
+			// clear warning so users know the operation was deliberately
+			// dropped (vs. an undocumented bug).
+			if (!isGeneratableMethod(method)) {
+				if (operation.operationId) {
+					logger.warn(
+						{
+							method: method.toUpperCase(),
+							path: pathTemplate,
+							operationId: operation.operationId,
+						},
+						"Skipping operation — HTTP method not yet supported by the runtime client",
+					);
+				}
+				continue;
+			}
 
 			// Skip operations without operationId
 			if (!operation.operationId || typeof operation.operationId !== "string") {
@@ -379,7 +404,9 @@ function parseContracts(spec: unknown): ContractMetadata {
 	if (!paths) return result;
 
 	for (const [pathTemplate, pathItem] of Object.entries(paths)) {
-		for (const method of ["get", "post", "put", "delete", "patch"]) {
+		// Mirror parseOperations: only collect contracts for methods the
+		// runtime client can call. Issue #31.
+		for (const method of GENERATABLE_HTTP_METHODS) {
 			const operation = pathItem[method] as Record<string, unknown> | undefined;
 			if (!operation) continue;
 			if (!operation.operationId || typeof operation.operationId !== "string") continue;
@@ -720,7 +747,7 @@ function resolveOperationSchema(
 	if (!paths) return null;
 
 	for (const pathItem of Object.values(paths)) {
-		for (const method of ["get", "post", "put", "delete", "patch"]) {
+		for (const method of GENERATABLE_HTTP_METHODS) {
 			const op = pathItem[method] as Record<string, unknown> | undefined;
 			if (!op || op.operationId !== operationId) continue;
 

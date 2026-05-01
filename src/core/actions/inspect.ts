@@ -71,16 +71,9 @@ export interface InspectActionOptions {
 // Internal helpers
 // ---------------------------------------------------------------------------
 
-/** HTTP methods to iterate when parsing paths. */
-const HTTP_METHODS = [
-	"get",
-	"post",
-	"put",
-	"delete",
-	"patch",
-	"options",
-	"head",
-] as const;
+/** HTTP methods to iterate when parsing paths. Shared with validate/diff/
+ *  status so all 8 OpenAPI methods are visible. Issue #31. */
+import { HTTP_METHODS } from "../http-methods.js";
 
 // ---------------------------------------------------------------------------
 // Endpoint parsing
@@ -264,7 +257,8 @@ function parseEndpoints(spec: unknown): EndpointDetail[] {
 		}
 	}
 
-	// Sort by path first, then by method for consistent ordering
+	// Sort by path first, then by method for consistent ordering. Includes
+	// trace so all 8 methods sort deterministically. Issue #31.
 	const methodOrder: Record<string, number> = {
 		get: 0,
 		post: 1,
@@ -273,6 +267,7 @@ function parseEndpoints(spec: unknown): EndpointDetail[] {
 		delete: 4,
 		options: 5,
 		head: 6,
+		trace: 7,
 	};
 
 	endpoints.sort((a, b) => {
