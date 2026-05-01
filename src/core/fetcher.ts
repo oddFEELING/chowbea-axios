@@ -119,20 +119,30 @@ const DEFAULT_RETRY_CONFIG: RetryConfig = {
 
 /**
  * Interpolates environment variables in a string.
- * Replaces $VAR_NAME or ${VAR_NAME} with the environment variable value.
+ *
+ * Recognizes both `$VAR_NAME` and `${VAR_NAME}` forms. Mismatched braces
+ * (`${VAR` or `$VAR}`) no longer match — the prior regex used independent
+ * `?`-quantified braces and silently consumed half-pairs. Issue #29.
+ *
  * Throws if a referenced env var is not set.
  */
 export function interpolateEnvVars(value: string): string {
-	// Match $VAR_NAME or ${VAR_NAME}
-	return value.replace(/\$\{?([A-Z_][A-Z0-9_]*)\}?/gi, (_match, varName) => {
-		const envValue = process.env[varName];
-		if (envValue === undefined) {
-			throw new Error(
-				`Environment variable ${varName} is not set (referenced in: ${value})`
-			);
-		}
-		return envValue;
-	});
+	// Match either `${VAR}` (braced) or `$VAR` (bare). Two alternatives
+	// rather than independent optional braces ensures we never consume a
+	// stray `{` or `}`.
+	return value.replace(
+		/\$\{([A-Z_][A-Z0-9_]*)\}|\$([A-Z_][A-Z0-9_]*)/gi,
+		(_match, braced: string | undefined, bare: string | undefined) => {
+			const varName = braced ?? bare ?? "";
+			const envValue = process.env[varName];
+			if (envValue === undefined) {
+				throw new Error(
+					`Environment variable ${varName} is not set (referenced in: ${value})`
+				);
+			}
+			return envValue;
+		},
+	);
 }
 
 /**
@@ -213,6 +223,36 @@ export async function loadCachedSpec(specPath: string): Promise<Buffer | null> {
 }
 
 /**
+ * Validates a remote endpoint URL before we issue an HTTP request to it.
+ *
+ * - Must parse as a URL (rejects garbage strings).
+ * - Must use `http:` or `https:` (rejects `file:`, `data:`, custom
+ *   schemes that could exfiltrate or sidestep the fetch pipeline).
+ *
+ * Issue #20. Tightening to also reject private/loopback hosts is a
+ * separate optional layer — left to a future opt-in flag because most
+ * legitimate users develop against `localhost:3000`.
+ */
+function validateEndpointUrl(endpoint: string): URL {
+	let url: URL;
+	try {
+		url = new URL(endpoint);
+	} catch {
+		throw new NetworkError(
+			endpoint,
+			`Invalid endpoint URL: ${endpoint}`,
+		);
+	}
+	if (url.protocol !== "http:" && url.protocol !== "https:") {
+		throw new NetworkError(
+			endpoint,
+			`Unsupported URL scheme "${url.protocol}" — only http: and https: are allowed for remote spec endpoints.`,
+		);
+	}
+	return url;
+}
+
+/**
  * Fetches the OpenAPI spec from a remote endpoint with retry logic.
  * Falls back to cached spec on network failure.
  */
@@ -228,6 +268,10 @@ export async function fetchOpenApiSpec(options: {
 }): Promise<FetchResult> {
 	const { endpoint, specPath, cachePath, logger, force = false } = options;
 	const retryConfig = options.retryConfig ?? DEFAULT_RETRY_CONFIG;
+
+	// Reject malformed or non-http(s) URLs before issuing any network
+	// request. Issue #20.
+	validateEndpointUrl(endpoint);
 
 	// Interpolate env vars in headers
 	const headers: Record<string, string> = {

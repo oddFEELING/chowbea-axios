@@ -98,13 +98,17 @@ export const DEFAULT_WATCH_CONFIG: WatchConfig = {
 
 /**
  * Default instance configuration values.
+ *
+ * `with_credentials` defaults to `false` — sending cookies cross-origin
+ * is a footgun for cookie-based auth setups and not what most users
+ * want. Cookie-auth users opt in explicitly. Issue #28.
  */
 export const DEFAULT_INSTANCE_CONFIG: InstanceConfig = {
   base_url_env: "API_BASE_URL",
   env_accessor: "process.env",
   token_key: "auth-token",
   auth_mode: "custom",
-  with_credentials: true,
+  with_credentials: false,
   timeout: 30_000,
 };
 
@@ -124,16 +128,32 @@ export const DEFAULT_CONFIG: ApiConfig = {
 };
 
 /**
+ * Encodes an arbitrary string for safe inclusion in a TOML basic string
+ * value. JSON.stringify produces a strict subset of TOML basic-string
+ * syntax (`\"`, `\\`, `\n`, `\t`, `\r`, `\uXXXX`), so any character a
+ * user types — including `"`, `\`, control codes, non-ASCII — round-
+ * trips through TOML safely. Issue #27.
+ */
+function tomlEscape(value: string): string {
+  return JSON.stringify(value);
+}
+
+/**
  * Generates config file content from an ApiConfig object.
  * Single source of truth — used by both auto-create and init command.
+ *
+ * Every interpolated string flows through `tomlEscape` (`JSON.stringify`)
+ * so values containing `"`, `\`, or control chars produce valid TOML
+ * rather than a malformed file. Issue #27.
  */
 export function generateConfigTemplate(config: ApiConfig): string {
   // Emit whichever spec source is configured as the active line, and the
   // other as a commented-out example.
+  const fallbackEndpoint = config.api_endpoint ?? "https://api.example.com/openapi.json";
   const specSourceBlock = config.spec_file
-    ? `# api_endpoint = "${config.api_endpoint ?? "https://api.example.com/openapi.json"}"  # Use remote endpoint instead of local file
-spec_file = "${config.spec_file}"`
-    : `api_endpoint = "${config.api_endpoint}"
+    ? `# api_endpoint = ${tomlEscape(fallbackEndpoint)}  # Use remote endpoint instead of local file
+spec_file = ${tomlEscape(config.spec_file)}`
+    : `api_endpoint = ${tomlEscape(config.api_endpoint ?? "")}
 # spec_file = "./openapi.json"  # Use local file instead of remote`;
 
   return `# Chowbea Axios Configuration
@@ -142,13 +162,13 @@ ${specSourceBlock}
 poll_interval_ms = ${config.poll_interval_ms}
 
 [output]
-folder = "${config.output.folder}"
+folder = ${tomlEscape(config.output.folder)}
 
 [instance]
-base_url_env = "${config.instance.base_url_env}"
-env_accessor = "${config.instance.env_accessor}"
-token_key = "${config.instance.token_key}"
-auth_mode = "${config.instance.auth_mode}"
+base_url_env = ${tomlEscape(config.instance.base_url_env)}
+env_accessor = ${tomlEscape(config.instance.env_accessor)}
+token_key = ${tomlEscape(config.instance.token_key)}
+auth_mode = ${tomlEscape(config.instance.auth_mode)}
 with_credentials = ${config.instance.with_credentials}
 timeout = ${config.instance.timeout}
 
@@ -501,10 +521,31 @@ export function resolveSpecSource(
 }
 
 /**
- * Loads and parses the configuration file.
- * Auto-creates with defaults if missing.
+ * Options for `loadConfig`.
  */
-export async function loadConfig(configPath?: string): Promise<{
+export interface LoadConfigOptions {
+  /**
+   * When true and the config file is missing, create one with defaults.
+   * Defaults to false — only `init` should create config; other commands
+   * fail loudly when config is absent so CI/non-interactive runs don't
+   * silently use a localhost endpoint. Issue #39.
+   */
+  autoCreate?: boolean;
+}
+
+/**
+ * Loads and parses the configuration file.
+ *
+ * By default, throws `ConfigError` when the file is missing — call sites
+ * that legitimately want to create one (only `init`) opt in via
+ * `{ autoCreate: true }`. This prevents commands like `fetch`/`generate`
+ * from silently writing a default config in CI environments where a
+ * missing file should be a hard error. Issue #39.
+ */
+export async function loadConfig(
+  configPath?: string,
+  options: LoadConfigOptions = {},
+): Promise<{
   config: ApiConfig;
   projectRoot: string;
   configPath: string;
@@ -518,7 +559,13 @@ export async function loadConfig(configPath?: string): Promise<{
   const exists = await configExists(resolvedConfigPath);
 
   if (!exists) {
-    // Auto-create config with defaults
+    if (!options.autoCreate) {
+      throw new ConfigError(
+        `No api.config.toml found at ${resolvedConfigPath}`,
+        "Run 'chowbea-axios init' to create one.",
+      );
+    }
+    // Auto-create config with defaults (init only)
     await createDefaultConfig(resolvedConfigPath);
 
     return {
