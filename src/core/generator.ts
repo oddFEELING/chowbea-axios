@@ -2293,6 +2293,65 @@ export type { paths, components, operations };
 }
 
 /**
+ * Compares the user's existing `api.instance.ts` to what we'd emit
+ * given the current `[instance]` config. Returns the changed fields
+ * when drift is detected, or `null` when the existing file is in sync.
+ *
+ * Implementation detail: the emitted file embeds each field as a
+ * recognizable line (`baseURL: process.env.API_BASE_URL`,
+ * `withCredentials: true`, `timeout: 30000`, `tokenKey = "auth-token"`).
+ * We grep for each line and compare against the config.
+ *
+ * Issue #40.
+ */
+async function detectInstanceConfigDrift(
+	instancePath: string,
+	config: InstanceConfig,
+): Promise<{ changedFields: string[] } | null> {
+	const existing = await readFile(instancePath, "utf8").catch(() => null);
+	if (existing == null) return null;
+
+	const changed: string[] = [];
+
+	// baseURL: <env_accessor>.<base_url_env>
+	const expectedBaseUrl = `baseURL: ${config.env_accessor}.${config.base_url_env},`;
+	if (!existing.includes(expectedBaseUrl)) {
+		changed.push("base_url_env/env_accessor");
+	}
+
+	// withCredentials: <bool>
+	const expectedCreds = `withCredentials: ${config.with_credentials},`;
+	if (!existing.includes(expectedCreds)) {
+		changed.push("with_credentials");
+	}
+
+	// timeout: <ms>
+	const expectedTimeout = `timeout: ${config.timeout},`;
+	if (!existing.includes(expectedTimeout)) {
+		changed.push("timeout");
+	}
+
+	// auth_mode and token_key only matter when auth_mode is bearer-localstorage
+	if (config.auth_mode === "bearer-localstorage") {
+		const expectedToken = `export const tokenKey = ${JSON.stringify(config.token_key)};`;
+		if (!existing.includes(expectedToken)) {
+			changed.push("token_key");
+		}
+		if (!/localStorage\.getItem\(tokenKey\)/.test(existing)) {
+			changed.push("auth_mode");
+		}
+	} else if (config.auth_mode === "none") {
+		if (/localStorage\.getItem\(tokenKey\)/.test(existing)) {
+			changed.push("auth_mode");
+		}
+	}
+	// `auth_mode === "custom"` has a TODO interceptor; users typically
+	// edit this, so don't flag drift there.
+
+	return changed.length > 0 ? { changedFields: changed } : null;
+}
+
+/**
  * Generates client files if they don't exist.
  * Returns which files were generated.
  */
@@ -2329,7 +2388,10 @@ export async function generateClientFiles(options: {
 		logger.debug("api.helpers.ts already exists, skipping");
 	}
 
-	// Generate api.instance.ts if it doesn't exist
+	// Generate api.instance.ts if it doesn't exist. When the file already
+	// exists, compare the user's `[instance]` config against what would
+	// be emitted today; if they differ, warn so the user knows their
+	// config change won't take effect until they regenerate. Issue #40.
 	const instanceExists = await fileExists(outputPaths.instance);
 	if (!instanceExists || force) {
 		logger.info(
@@ -2342,7 +2404,22 @@ export async function generateClientFiles(options: {
 		await atomicWrite(outputPaths.instance, content);
 		result.instance = true;
 	} else {
-		logger.debug("api.instance.ts already exists, skipping");
+		// Detect drift: did the [instance] config change since the file was
+		// last generated? Compare a normalized representation of the
+		// config against what we'd emit now. If different, the user's
+		// config edit won't take effect until they regenerate.
+		const drift = await detectInstanceConfigDrift(
+			outputPaths.instance,
+			instanceConfig,
+		);
+		if (drift) {
+			logger.warn(
+				{ path: outputPaths.instance, fields: drift.changedFields.join(", ") },
+				`api.instance.ts is out of sync with [instance] config (changed: ${drift.changedFields.join(", ")}). Run 'chowbea-axios init --force' or delete ${outputPaths.instance} to regenerate.`,
+			);
+		} else {
+			logger.debug("api.instance.ts already exists, skipping");
+		}
 	}
 
 	// Generate api.error.ts if it doesn't exist
