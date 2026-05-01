@@ -174,8 +174,11 @@ function generateOperationFunction(operation: OperationMetadata): string {
 		}
 	}
 
+	// Quote operation key when it isn't a valid bare JS identifier (e.g.
+	// kebab-case operationIds like `get-user`). Without this the emitted
+	// object literal is syntactically invalid TypeScript. Issue #13.
 	return `${jsdoc.join("\n")}
-  ${operationId}: (${functionParams}): ${returnType} => ${apiCall},\n`;
+  ${formatPropertyKey(operationId)}: (${functionParams}): ${returnType} => ${apiCall},\n`;
 }
 
 /**
@@ -281,6 +284,34 @@ function parseOperations(spec: unknown, logger: Logger): OperationMetadata[] {
 
 			logger.debug({ operationId: operation.operationId }, "Found operation");
 		}
+	}
+
+	// Detect operationId collisions after sanitizeIdentifier — e.g.
+	// `get-user` and `get_user` both normalize to `get_user`, which would
+	// produce duplicate contract types and clobber operations in the
+	// emitted object literal. Issue #18.
+	const sanitizedToOriginals = new Map<string, string[]>();
+	for (const op of operations) {
+		const sanitized = sanitizeIdentifier(op.operationId);
+		const list = sanitizedToOriginals.get(sanitized);
+		if (list) list.push(op.operationId);
+		else sanitizedToOriginals.set(sanitized, [op.operationId]);
+	}
+	const collisions: Array<{ sanitized: string; originals: string[] }> = [];
+	for (const [sanitized, originals] of sanitizedToOriginals) {
+		if (originals.length > 1) collisions.push({ sanitized, originals });
+	}
+	if (collisions.length > 0) {
+		const lines = collisions
+			.map(
+				(c) =>
+					`  - "${c.originals.join('", "')}" all sanitize to "${c.sanitized}"`,
+			)
+			.join("\n");
+		throw new GenerationError(
+			"parseOperations",
+			`OperationId collision detected. The following operationIds normalize to the same TypeScript identifier and would produce duplicate contract types:\n${lines}\n\nRename one of each pair so they remain distinct after replacing non-[a-zA-Z0-9_$] characters with "_".`,
+		);
 	}
 
 	return operations;
@@ -600,9 +631,11 @@ function schemaToTS(
 		return parts.join(" | ") || "unknown";
 	}
 
-	// enum
+	// enum — JSON.stringify escapes `"`, `\`, and control chars so values
+	// like `He said "hi"` or paths containing `\` produce valid TS literals.
+	// Issue #15.
 	if (Array.isArray(schema.enum)) {
-		return schema.enum.map((v) => (typeof v === "string" ? `"${v}"` : String(v))).join(" | ");
+		return schema.enum.map((v) => (typeof v === "string" ? JSON.stringify(v) : String(v))).join(" | ");
 	}
 
 	const schemaType = schema.type as string | string[] | undefined;
