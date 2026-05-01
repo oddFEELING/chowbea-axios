@@ -3,7 +3,7 @@
   "info": {
     "title": "Edge Cases",
     "version": "1.0.0",
-    "description": "Spec exercising known generator edge cases (issues #13–#19, #22, #26, #31, #32)."
+    "description": "Spec exercising known generator edge cases (issues #13, #14, #15, #19, #22, #26, #31, #32). Issue #18 (sanitize collision) is tested with a dedicated inline fixture in generator.test.ts so it doesn't crash the rest of this spec's snapshot tests."
   },
   "paths": {
     "/users/{id}": {
@@ -28,13 +28,6 @@
               }
             }
           }
-        }
-      },
-      "patch": {
-        "operationId": "get_user",
-        "summary": "Update user (snake_case collides with get-user via sanitizeIdentifier — issue #18)",
-        "responses": {
-          "200": { "description": "OK" }
         }
       },
       "head": {

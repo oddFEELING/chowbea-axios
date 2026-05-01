@@ -10,6 +10,7 @@ import {
 	detectPackageManager,
 	getDlxCommand,
 	getInstallCommand,
+	resolveCommand,
 } from "../core/pm.js";
 
 /**
@@ -51,12 +52,13 @@ async function installPackage(
 ): Promise<void> {
 	console.log(`Installing ${pkg}...`);
 	const pm = await detectPackageManager(projectRoot);
+	// Drop `shell: true` (Node 24 DEP0190); resolveCommand handles
+	// Windows .cmd shims. Issue #16.
 	const [cmd, ...args] = getInstallCommand(pm, pkg, dev);
-	spawnSync(cmd, args, {
+	spawnSync(resolveCommand(cmd), args, {
 		cwd: projectRoot,
 		stdio: "inherit",
 		timeout: 60_000,
-		shell: true,
 	});
 }
 
@@ -67,26 +69,25 @@ async function ensureOpenApiTypescript(projectRoot: string): Promise<void> {
 	const pm = await detectPackageManager(projectRoot);
 	const [cmd, ...dlxArgs] = getDlxCommand(pm);
 
-	// Quick check: try running with --version to see if it's cached
+	// Drop `shell: true` (Node 24 DEP0190); resolveCommand handles
+	// Windows .cmd shims. Issue #16.
 	const check = spawnSync(
-		cmd,
+		resolveCommand(cmd),
 		[...dlxArgs, "openapi-typescript", "--version"],
 		{
 			cwd: projectRoot,
 			stdio: "pipe",
 			timeout: 30_000,
-			shell: true,
 		},
 	);
 
 	if (check.status !== 0) {
 		console.log("Pre-caching openapi-typescript (used for type generation)...");
 		// Run it once so dlx/npx caches the package
-		spawnSync(cmd, [...dlxArgs, "openapi-typescript", "--help"], {
+		spawnSync(resolveCommand(cmd), [...dlxArgs, "openapi-typescript", "--help"], {
 			cwd: projectRoot,
 			stdio: "pipe",
 			timeout: 60_000,
-			shell: true,
 		});
 	}
 }
@@ -113,11 +114,12 @@ async function ensureProjectDependencies(): Promise<void> {
 				);
 				process.exit(1);
 			}
-			spawnSync(pm, ["install"], {
+			// Drop `shell: true` (Node 24 DEP0190); resolveCommand handles
+			// Windows .cmd shims. Issue #16.
+			spawnSync(resolveCommand(pm), ["install"], {
 				cwd: projectRoot,
 				stdio: "inherit",
 				timeout: 120_000,
-				shell: true,
 			});
 		}
 

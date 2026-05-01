@@ -12,6 +12,7 @@ import type { OutputPaths } from "../config.js";
 import { formatError } from "../errors.js";
 import { hasLocalSpec, loadCacheMetadata, loadLocalSpec } from "../fetcher.js";
 import type { CacheMetadata } from "../fetcher.js";
+import { HTTP_METHODS } from "../http-methods.js";
 
 /**
  * Options for the status action.
@@ -21,7 +22,9 @@ export interface StatusActionOptions {
 }
 
 /**
- * HTTP method counts for endpoint statistics.
+ * HTTP method counts for endpoint statistics. Covers all 8 OpenAPI 3
+ * Path Item methods so users see their full spec, not just the 5 the
+ * generator can emit. Issue #31.
  */
 export interface MethodCounts {
 	get: number;
@@ -29,6 +32,9 @@ export interface MethodCounts {
 	put: number;
 	delete: number;
 	patch: number;
+	options: number;
+	head: number;
+	trace: number;
 	total: number;
 }
 
@@ -68,7 +74,8 @@ export function formatTimeAgo(date: Date): string {
 }
 
 /**
- * Counts endpoints by HTTP method from the OpenAPI spec.
+ * Counts endpoints by HTTP method from the OpenAPI spec. Covers all 8
+ * methods (GET/POST/PUT/DELETE/PATCH/OPTIONS/HEAD/TRACE) — issue #31.
  */
 export async function countEndpoints(specPath: string): Promise<MethodCounts> {
 	const counts: MethodCounts = {
@@ -77,6 +84,9 @@ export async function countEndpoints(specPath: string): Promise<MethodCounts> {
 		put: 0,
 		delete: 0,
 		patch: 0,
+		options: 0,
+		head: 0,
+		trace: 0,
 		total: 0,
 	};
 
@@ -90,13 +100,7 @@ export async function countEndpoints(specPath: string): Promise<MethodCounts> {
 		for (const pathItem of Object.values(paths)) {
 			if (typeof pathItem !== "object" || pathItem === null) continue;
 
-			for (const method of [
-				"get",
-				"post",
-				"put",
-				"delete",
-				"patch",
-			] as const) {
+			for (const method of HTTP_METHODS) {
 				if (pathItem[method]) {
 					counts[method]++;
 					counts.total++;

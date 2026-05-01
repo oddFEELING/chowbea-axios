@@ -16,7 +16,12 @@ import { findProjectRoot } from "./config.js";
 import type { InstanceConfig, OutputPaths } from "./config.js";
 import { GenerationError } from "./errors.js";
 import type { Logger } from "../adapters/logger-interface.js";
-import { detectPackageManager, getDlxCommand } from "./pm.js";
+import {
+	GENERATABLE_HTTP_METHODS,
+	HTTP_METHODS,
+	isGeneratableMethod,
+} from "./http-methods.js";
+import { detectPackageManager, getDlxCommand, resolveCommand } from "./pm.js";
 import { pickJsonContent } from "./ref-utils.js";
 
 /**
@@ -128,19 +133,21 @@ function generateOperationFunction(operation: OperationMetadata): string {
 		: `AxiosRequestConfig`;
 	params.push(`config?: ${configType}`);
 
-	// Generate JSDoc comment
+	// Generate JSDoc comment. Every interpolated user-controlled string is
+	// run through escapeJsdoc so a `*/` in a description/path/operationId
+	// can't close the comment early and leak content into code position.
 	const jsdoc: string[] = [];
 	jsdoc.push("  /**");
 	if (summary) {
-		jsdoc.push(`   * ${summary}`);
+		jsdoc.push(`   * ${escapeJsdoc(summary)}`);
 	}
 	if (description && description !== summary) {
-		jsdoc.push(`   * ${description}`);
+		jsdoc.push(`   * ${escapeJsdoc(description)}`);
 	}
 	jsdoc.push("   * ");
-	jsdoc.push(`   * @operationId ${operationId}`);
+	jsdoc.push(`   * @operationId ${escapeJsdoc(operationId)}`);
 	jsdoc.push(`   * @method ${method.toUpperCase()}`);
-	jsdoc.push(`   * @path ${pathTemplate}`);
+	jsdoc.push(`   * @path ${escapeJsdoc(pathTemplate)}`);
 	jsdoc.push("   */");
 
 	// Generate function with explicit return type - uses Result<T> for consistent error handling.
@@ -149,33 +156,40 @@ function generateOperationFunction(operation: OperationMetadata): string {
 	const responseType = responseStatus !== null ? `${contractBase}Response` : `unknown`;
 	const returnType = `Promise<Result<${responseType}>>`;
 
-	// Build the apiClient call (apiClient methods already return Result<T>)
+	// Build the apiClient call (apiClient methods already return Result<T>).
+	// Use JSON.stringify for the path so any `"` or `\` in the template is
+	// properly escaped as a TS string literal (defense in depth — paths in
+	// real specs rarely contain these, but malformed/malicious specs could).
+	const pathLiteral = JSON.stringify(pathTemplate);
 	let apiCall: string;
 	if (hasRequestBody) {
 		// POST/PUT/PATCH with body
 		if (pathParams.length > 0) {
-			apiCall = `apiClient.${httpMethod}("${pathTemplate}", data, pathParams, config)`;
+			apiCall = `apiClient.${httpMethod}(${pathLiteral}, data, pathParams, config)`;
 		} else {
-			apiCall = `apiClient.${httpMethod}("${pathTemplate}", data, config)`;
+			apiCall = `apiClient.${httpMethod}(${pathLiteral}, data, config)`;
 		}
 	} else {
 		// GET/DELETE without body
 		// PATCH without body still needs undefined as data parameter
 		if (httpMethod === "patch") {
 			if (pathParams.length > 0) {
-				apiCall = `apiClient.${httpMethod}("${pathTemplate}", undefined, pathParams, config)`;
+				apiCall = `apiClient.${httpMethod}(${pathLiteral}, undefined, pathParams, config)`;
 			} else {
-				apiCall = `apiClient.${httpMethod}("${pathTemplate}", undefined, config)`;
+				apiCall = `apiClient.${httpMethod}(${pathLiteral}, undefined, config)`;
 			}
 		} else if (pathParams.length > 0) {
-			apiCall = `apiClient.${httpMethod}("${pathTemplate}", pathParams, config)`;
+			apiCall = `apiClient.${httpMethod}(${pathLiteral}, pathParams, config)`;
 		} else {
-			apiCall = `apiClient.${httpMethod}("${pathTemplate}", config)`;
+			apiCall = `apiClient.${httpMethod}(${pathLiteral}, config)`;
 		}
 	}
 
+	// Quote operation key when it isn't a valid bare JS identifier (e.g.
+	// kebab-case operationIds like `get-user`). Without this the emitted
+	// object literal is syntactically invalid TypeScript. Issue #13.
 	return `${jsdoc.join("\n")}
-  ${operationId}: (${functionParams}): ${returnType} => ${apiCall},\n`;
+  ${formatPropertyKey(operationId)}: (${functionParams}): ${returnType} => ${apiCall},\n`;
 }
 
 /**
@@ -199,11 +213,31 @@ function parseOperations(spec: unknown, logger: Logger): OperationMetadata[] {
 
 	// Iterate through all paths
 	for (const [pathTemplate, pathItem] of Object.entries(paths)) {
-		// Iterate through all HTTP methods
-		for (const method of ["get", "post", "put", "delete", "patch"]) {
+		// Walk every HTTP method on this path. Methods that aren't yet
+		// supported by the runtime client (OPTIONS/HEAD/TRACE) are still
+		// inspected so we can warn the user, but the operations file only
+		// emits entries for `GENERATABLE_HTTP_METHODS`. Issue #31.
+		for (const method of HTTP_METHODS) {
 			const operation = pathItem[method] as Record<string, unknown> | undefined;
 
 			if (!operation) continue;
+
+			// Skip operations whose method isn't generatable today, with a
+			// clear warning so users know the operation was deliberately
+			// dropped (vs. an undocumented bug).
+			if (!isGeneratableMethod(method)) {
+				if (operation.operationId) {
+					logger.warn(
+						{
+							method: method.toUpperCase(),
+							path: pathTemplate,
+							operationId: operation.operationId,
+						},
+						"Skipping operation — HTTP method not yet supported by the runtime client",
+					);
+				}
+				continue;
+			}
 
 			// Skip operations without operationId
 			if (!operation.operationId || typeof operation.operationId !== "string") {
@@ -283,6 +317,34 @@ function parseOperations(spec: unknown, logger: Logger): OperationMetadata[] {
 		}
 	}
 
+	// Detect operationId collisions after sanitizeIdentifier — e.g.
+	// `get-user` and `get_user` both normalize to `get_user`, which would
+	// produce duplicate contract types and clobber operations in the
+	// emitted object literal. Issue #18.
+	const sanitizedToOriginals = new Map<string, string[]>();
+	for (const op of operations) {
+		const sanitized = sanitizeIdentifier(op.operationId);
+		const list = sanitizedToOriginals.get(sanitized);
+		if (list) list.push(op.operationId);
+		else sanitizedToOriginals.set(sanitized, [op.operationId]);
+	}
+	const collisions: Array<{ sanitized: string; originals: string[] }> = [];
+	for (const [sanitized, originals] of sanitizedToOriginals) {
+		if (originals.length > 1) collisions.push({ sanitized, originals });
+	}
+	if (collisions.length > 0) {
+		const lines = collisions
+			.map(
+				(c) =>
+					`  - "${c.originals.join('", "')}" all sanitize to "${c.sanitized}"`,
+			)
+			.join("\n");
+		throw new GenerationError(
+			"parseOperations",
+			`OperationId collision detected. The following operationIds normalize to the same TypeScript identifier and would produce duplicate contract types:\n${lines}\n\nRename one of each pair so they remain distinct after replacing non-[a-zA-Z0-9_$] characters with "_".`,
+		);
+	}
+
 	return operations;
 }
 
@@ -342,7 +404,9 @@ function parseContracts(spec: unknown): ContractMetadata {
 	if (!paths) return result;
 
 	for (const [pathTemplate, pathItem] of Object.entries(paths)) {
-		for (const method of ["get", "post", "put", "delete", "patch"]) {
+		// Mirror parseOperations: only collect contracts for methods the
+		// runtime client can call. Issue #31.
+		for (const method of GENERATABLE_HTTP_METHODS) {
 			const operation = pathItem[method] as Record<string, unknown> | undefined;
 			if (!operation) continue;
 			if (!operation.operationId || typeof operation.operationId !== "string") continue;
@@ -544,6 +608,23 @@ function formatPropertyKey(name: string): string {
 }
 
 /**
+ * Escapes the JSDoc comment terminator inside a string so it can't close a
+ * surrounding `/* ... *\/` block. The replacement is unchanged when the
+ * comment is read but the parser no longer matches the literal two-char
+ * sequence.
+ *
+ * Without this, a spec author (or compromised remote spec) including the
+ * terminator inside a description, summary, or path closes the JSDoc
+ * comment early and leaks the rest of the description into the file as raw
+ * TypeScript syntax — at best a parse error, at worst arbitrary code.
+ * Issue #14.
+ */
+function escapeJsdoc(value: string | undefined | null): string {
+	if (value === undefined || value === null) return "";
+	return String(value).replace(/\*\//g, "*\\/");
+}
+
+/**
  * Capitalizes the first letter of a string (for PascalCase conversion from camelCase operationIds).
  */
 function toPascalCase(str: string): string {
@@ -563,9 +644,51 @@ function resolveRefName(ref: string): string | null {
 }
 
 /**
+ * Renders `additionalProperties` as a `Record<string, T>` clause, or
+ * `null` when no additional-properties contract applies. Issue #32.
+ *
+ * - `true` / any truthy non-object  → `Record<string, unknown>`
+ * - schema object (e.g. `{ type: "string" }`) → `Record<string, T>`
+ *   where `T` is recursively rendered.
+ * - `false` / `undefined`           → `null` (closed shape; no clause)
+ */
+function renderAdditionalProperties(
+	additionalProperties: unknown,
+	indent: string,
+	allSchemas: Record<string, unknown>,
+	visited: Set<string>,
+): string | null {
+	if (additionalProperties === undefined || additionalProperties === false) {
+		return null;
+	}
+	if (additionalProperties === true) {
+		return "Record<string, unknown>";
+	}
+	if (typeof additionalProperties === "object" && additionalProperties !== null) {
+		const valueType = schemaToTS(
+			additionalProperties as Record<string, unknown>,
+			indent,
+			allSchemas,
+			visited,
+		);
+		// Wrap unions/intersections so the Record value type parses cleanly.
+		const needsParens = valueType.includes(" | ") || valueType.includes(" & ");
+		return `Record<string, ${needsParens ? `(${valueType})` : valueType}>`;
+	}
+	return null;
+}
+
+/**
  * Converts a JSON Schema to a fully-expanded TypeScript type string.
- * Recursively inlines $ref schemas so every type is visible without indirection.
- * Uses a visited set to detect circular references (falls back to `unknown` for cycles).
+ * Recursively inlines $ref schemas so every type is visible without
+ * indirection.
+ *
+ * For recursive schemas (a `$ref` whose target is already on the
+ * inlining stack), emits the sanitized type name from the contracts
+ * file rather than collapsing to `unknown`. The contracts file emits
+ * a top-level `export interface <Name>` for every entry in
+ * `components.schemas`, so the named reference resolves at TS compile
+ * time. Issue #26.
  */
 function schemaToTS(
 	schema: Record<string, unknown>,
@@ -575,11 +698,13 @@ function schemaToTS(
 ): string {
 	if (!schema || typeof schema !== "object") return "unknown";
 
-	// $ref → recursively inline the referenced schema
+	// $ref → recursively inline the referenced schema. On cycles, emit
+	// the sanitized name (the contracts file has a top-level interface
+	// for it) instead of collapsing to `unknown`. Issue #26.
 	if (schema.$ref && typeof schema.$ref === "string") {
 		const refName = resolveRefName(schema.$ref);
 		if (!refName) return "unknown";
-		if (visited.has(refName)) return "unknown"; // circular ref guard
+		if (visited.has(refName)) return sanitizeIdentifier(refName);
 		const refSchema = allSchemas[refName] as Record<string, unknown> | undefined;
 		if (!refSchema) return "unknown";
 		const newVisited = new Set(visited);
@@ -600,9 +725,11 @@ function schemaToTS(
 		return parts.join(" | ") || "unknown";
 	}
 
-	// enum
+	// enum — JSON.stringify escapes `"`, `\`, and control chars so values
+	// like `He said "hi"` or paths containing `\` produce valid TS literals.
+	// Issue #15.
 	if (Array.isArray(schema.enum)) {
-		return schema.enum.map((v) => (typeof v === "string" ? `"${v}"` : String(v))).join(" | ");
+		return schema.enum.map((v) => (typeof v === "string" ? JSON.stringify(v) : String(v))).join(" | ");
 	}
 
 	const schemaType = schema.type as string | string[] | undefined;
@@ -616,21 +743,41 @@ function schemaToTS(
 		return needsParens ? `(${itemType})[]` : `${itemType}[]`;
 	}
 
-	// object with properties → inline object type
+	// object with properties → inline object type. Honors
+	// `additionalProperties` per OpenAPI / JSON Schema:
+	//   - true (or any non-false truthy)             → Record<string, unknown>
+	//   - schema (e.g. { type: "string" })           → Record<string, T>
+	//   - false / undefined / explicit closed shape  → no record intersection
+	// Combined with named properties, the open-shape becomes an
+	// intersection (`{ ... } & Record<string, T>`). Issue #32.
 	if (schemaType === "object" || schema.properties) {
 		const properties = schema.properties as Record<string, Record<string, unknown>> | undefined;
+		const additionalType = renderAdditionalProperties(
+			schema.additionalProperties,
+			indent,
+			allSchemas,
+			visited,
+		);
+
 		if (!properties || Object.keys(properties).length === 0) {
-			return "Record<string, unknown>";
+			// No named properties — an open object collapses to a Record.
+			// `additionalProperties: false` is meaningless without props,
+			// so default to `Record<string, unknown>` if not specified.
+			return additionalType ?? "Record<string, unknown>";
 		}
+
 		const required = new Set<string>(Array.isArray(schema.required) ? schema.required as string[] : []);
 		const innerIndent = indent + "\t";
 		const props = Object.entries(properties).map(([key, propSchema]) => {
 			const optional = required.has(key) ? "" : "?";
 			const propType = schemaToTS(propSchema, innerIndent, allSchemas, visited);
-			const desc = propSchema.description ? ` /** ${propSchema.description} */\n${innerIndent}` : "";
+			const desc = propSchema.description
+				? ` /** ${escapeJsdoc(propSchema.description as string)} */\n${innerIndent}`
+				: "";
 			return `${desc}${formatPropertyKey(key)}${optional}: ${propType};`;
 		});
-		return `{\n${innerIndent}${props.join(`\n${innerIndent}`)}\n${indent}}`;
+		const objectType = `{\n${innerIndent}${props.join(`\n${innerIndent}`)}\n${indent}}`;
+		return additionalType ? `${objectType} & ${additionalType}` : objectType;
 	}
 
 	// primitive types
@@ -662,7 +809,7 @@ function resolveOperationSchema(
 	if (!paths) return null;
 
 	for (const pathItem of Object.values(paths)) {
-		for (const method of ["get", "post", "put", "delete", "patch"]) {
+		for (const method of GENERATABLE_HTTP_METHODS) {
 			const op = pathItem[method] as Record<string, unknown> | undefined;
 			if (!op || op.operationId !== operationId) continue;
 
@@ -744,8 +891,10 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 		for (const [name, schema] of schemaEntries) {
 			const typeName = sanitizeIdentifier(name);
 			const schemaObj = schema as Record<string, unknown>;
-			const desc = schemaObj.description ? ` * ${schemaObj.description}\n ` : "";
-			lines.push(`/**\n ${desc}* Schema: ${name}\n */`);
+			const desc = schemaObj.description
+				? ` * ${escapeJsdoc(schemaObj.description as string)}\n `
+				: "";
+			lines.push(`/**\n ${desc}* Schema: ${escapeJsdoc(name)}\n */`);
 
 			// For object schemas, emit an interface; for others, emit a type alias
 			if (schemaObj.type === "object" || schemaObj.properties) {
@@ -757,7 +906,7 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 						const optional = required.has(propKey) ? "" : "?";
 						const propType = schemaToTS(propSchema, "\t", allSchemas);
 						if (propSchema.description) {
-							lines.push(`\t/** ${propSchema.description} */`);
+							lines.push(`\t/** ${escapeJsdoc(propSchema.description as string)} */`);
 						}
 						lines.push(`\t${formatPropertyKey(propKey)}${optional}: ${propType};`);
 					}
@@ -789,9 +938,9 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 			for (const resp of op.allResponses) {
 				if (!resp.hasJsonContent) continue;
 				const statusTypeName = `${baseName}Response${resp.status}`;
-				const desc = resp.description ? ` - ${resp.description}` : "";
+				const desc = resp.description ? ` - ${escapeJsdoc(resp.description)}` : "";
 				const schema = resolveOperationSchema(metadata.spec, op.operationId, "response", resp.status);
-				lines.push(`/** Response: ${op.method.toUpperCase()} ${op.path} (${resp.status}${desc}) */`);
+				lines.push(`/** Response: ${op.method.toUpperCase()} ${escapeJsdoc(op.path)} (${resp.status}${desc}) */`);
 				if (schema) {
 					lines.push(`export type ${statusTypeName} = ${schemaToTS(schema, "", allSchemas)};`);
 				} else {
@@ -804,7 +953,7 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 			// Emit statusless alias pointing to the primary success response
 			if (op.responseStatus !== null) {
 				const successTypeName = `${baseName}Response${op.responseStatus}`;
-				lines.push(`/** Response: ${op.method.toUpperCase()} ${op.path} (happy path) */`);
+				lines.push(`/** Response: ${op.method.toUpperCase()} ${escapeJsdoc(op.path)} (happy path) */`);
 				lines.push(`export type ${baseName}Response = ${successTypeName};`);
 				lines.push(``);
 			}
@@ -823,7 +972,7 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 			const typeName = `${toPascalCase(sanitizeIdentifier(op.operationId))}Body`;
 			const contentType = op.hasJsonBody ? "application/json" : "multipart/form-data";
 			const schema = resolveOperationSchema(metadata.spec, op.operationId, "requestBody", undefined, contentType);
-			lines.push(`/** Request body: ${op.method.toUpperCase()} ${op.path} */`);
+			lines.push(`/** Request body: ${op.method.toUpperCase()} ${escapeJsdoc(op.path)} */`);
 			if (schema) {
 				lines.push(`export type ${typeName} = ${schemaToTS(schema, "", allSchemas)};`);
 			} else {
@@ -844,7 +993,7 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 		for (const op of pathParamOps) {
 			const typeName = `${toPascalCase(sanitizeIdentifier(op.operationId))}PathParams`;
 			const schema = resolveOperationSchema(metadata.spec, op.operationId, "pathParams");
-			lines.push(`/** Path params: ${op.method.toUpperCase()} ${op.path} */`);
+			lines.push(`/** Path params: ${op.method.toUpperCase()} ${escapeJsdoc(op.path)} */`);
 			if (schema) {
 				lines.push(`export type ${typeName} = ${schemaToTS(schema, "", allSchemas)};`);
 			} else {
@@ -865,7 +1014,7 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 		for (const op of queryParamOps) {
 			const typeName = `${toPascalCase(sanitizeIdentifier(op.operationId))}QueryParams`;
 			const schema = resolveOperationSchema(metadata.spec, op.operationId, "queryParams");
-			lines.push(`/** Query params: ${op.method.toUpperCase()} ${op.path} */`);
+			lines.push(`/** Query params: ${op.method.toUpperCase()} ${escapeJsdoc(op.path)} */`);
 			if (schema) {
 				lines.push(`export type ${typeName} = ${schemaToTS(schema, "", allSchemas)};`);
 			} else {
@@ -895,13 +1044,16 @@ async function generateTypes(
 
 	logger.debug({ pm, cmd }, "Using package manager for openapi-typescript");
 
+	// No `shell: true` — `specPath` and `typesPath` derive from
+	// `config.output.folder`, a user-controlled string. Passing them through
+	// the shell would allow shell-metacharacter injection. resolveCommand
+	// handles Windows .cmd shims for npx/bunx/etc. Issue #16.
 	const result = spawnSync(
-		cmd,
+		resolveCommand(cmd),
 		[...dlxArgs, "openapi-typescript", specPath, "--output", typesPath],
 		{
 			stdio: "pipe",
 			cwd: process.cwd(),
-			shell: true,
 		}
 	);
 
@@ -1366,14 +1518,54 @@ export type { Paths, HttpMethod, Expand, ExpandRecursively };
 }
 
 /**
+ * Allowed values for `instance.env_accessor`. These flow into the emitted
+ * `api.instance.ts` as raw JS expressions (not string literals), so the
+ * value MUST be a known-safe identifier. Anything else is a code-injection
+ * vector. Issue #17.
+ */
+const ALLOWED_ENV_ACCESSORS = new Set(["process.env", "import.meta.env"]);
+
+/** A bare JavaScript identifier (used for `instance.base_url_env`). */
+const JS_IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
+
+/**
+ * Validates `InstanceConfig` fields that are emitted as raw code (not
+ * string literals) in the generated `api.instance.ts`. Catches malicious
+ * or typo'd config that would otherwise be interpolated into JS.
+ *
+ * - `env_accessor` must be one of the documented accessors.
+ * - `base_url_env` must be a valid JS identifier.
+ *
+ * `token_key` is intentionally not restricted here — it's emitted via
+ * `JSON.stringify`, so any string is safe. Issue #17.
+ */
+function validateInstanceConfigForEmission(config: InstanceConfig): void {
+	if (!ALLOWED_ENV_ACCESSORS.has(config.env_accessor)) {
+		const allowed = [...ALLOWED_ENV_ACCESSORS].map((a) => `"${a}"`).join(", ");
+		throw new GenerationError(
+			"instance",
+			`Invalid env_accessor ${JSON.stringify(config.env_accessor)} — must be one of ${allowed}. Update [instance].env_accessor in api.config.toml.`,
+		);
+	}
+	if (!JS_IDENTIFIER.test(config.base_url_env)) {
+		throw new GenerationError(
+			"instance",
+			`Invalid base_url_env ${JSON.stringify(config.base_url_env)} — must be a valid JavaScript identifier matching /^[A-Za-z_$][\\w$]*$/. Update [instance].base_url_env in api.config.toml.`,
+		);
+	}
+}
+
+/**
  * Generates the auth interceptor block based on auth_mode.
  */
 function generateAuthInterceptor(config: InstanceConfig): string {
 	switch (config.auth_mode) {
 		case "bearer-localstorage":
+			// JSON.stringify the token_key so any `"`, `\`, or control char
+			// in the user's config produces a valid TS string literal. Issue #17.
 			return `
 /** localStorage key for auth token */
-export const tokenKey = "${config.token_key}";
+export const tokenKey = ${JSON.stringify(config.token_key)};
 
 /**
  * Request interceptor that automatically attaches the auth token.
@@ -1431,6 +1623,7 @@ axiosInstance.interceptors.request.use(
  * Generates the api.instance.ts file content.
  */
 export function generateInstanceFileContent(config: InstanceConfig): string {
+	validateInstanceConfigForEmission(config);
 	const authBlock = generateAuthInterceptor(config);
 
 	return `/**

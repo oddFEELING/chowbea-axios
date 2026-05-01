@@ -46,6 +46,7 @@ import {
   getDlxCommand,
   getInstallCommand,
   getRunCommand,
+  resolveCommand,
   type PackageManager,
 } from "../pm.js";
 
@@ -274,12 +275,13 @@ async function ensureAxios(
 
   logger.step("deps", "Installing axios...");
 
+  // Drop `shell: true` (deprecated by Node 24 / DEP0190); resolveCommand
+  // handles the Windows `.cmd` shim path. Issue #16.
   const [cmd, ...args] = getInstallCommand(pm, "axios");
-  const result = spawnSync(cmd, args, {
+  const result = spawnSync(resolveCommand(cmd), args, {
     cwd: projectRoot,
     stdio: "pipe",
     timeout: 60_000,
-    shell: true,
   });
 
   if (result.status !== 0) {
@@ -445,12 +447,13 @@ async function ensureConcurrently(
 
   logger.step("deps", "Installing concurrently...");
 
+  // Drop `shell: true` (deprecated by Node 24 / DEP0190); resolveCommand
+  // handles the Windows `.cmd` shim path. Issue #16.
   const [cmd, ...args] = getInstallCommand(pm, "concurrently", true);
-  const result = spawnSync(cmd, args, {
+  const result = spawnSync(resolveCommand(cmd), args, {
     cwd: projectRoot,
     stdio: "pipe",
     timeout: 60_000,
-    shell: true,
   });
 
   if (result.status !== 0) {
@@ -596,11 +599,12 @@ async function runInitialFetch(
 ): Promise<boolean> {
   logger.step("fetch", "Fetching OpenAPI spec and generating types...");
 
+  // Drop `shell: true` (deprecated by Node 24 / DEP0190); resolveCommand
+  // handles the Windows `.cmd` shim path. Issue #16.
   const [cmd, ...dlxArgs] = getDlxCommand(pm);
-  const result = spawnSync(cmd, [...dlxArgs, "chowbea-axios", "fetch"], {
+  const result = spawnSync(resolveCommand(cmd), [...dlxArgs, "chowbea-axios", "fetch"], {
     cwd: projectRoot,
     stdio: "pipe",
-    shell: true,
   });
 
   const runCmd = getRunCommand(pm);

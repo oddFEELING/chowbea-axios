@@ -37,7 +37,8 @@
     "@opentui/react": "^0.1.90",
     "picocolors": "^1.1.1",
     "react": "^19.2.4",
-    "toml": "^3.0.0"
+    "toml": "^3.0.0",
+    "yaml": "^2.8.3"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",
