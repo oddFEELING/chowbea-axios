@@ -66,7 +66,9 @@ export interface ValidateResult {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const HTTP_METHODS = ["get", "post", "put", "delete", "patch"] as const;
+// Re-imported from the shared module so we cover all 8 OpenAPI methods,
+// not just the 5 the runtime client can emit. Issue #31.
+import { HTTP_METHODS } from "../http-methods.js";
 
 interface CategoryResult {
 	issues: ValidationIssue[];
