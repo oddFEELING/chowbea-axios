@@ -104,6 +104,20 @@ export interface InitActionOptions {
   authMode: AuthMode;
   withCredentials: boolean;
   timeout: number;
+  /**
+   * Skip every interactive prompt and use defaults / supplied flags.
+   * The spec source MUST be supplied via `specSource` (or via the
+   * `--endpoint` / `--spec-file` flags on the CLI). Issue #43.
+   */
+  nonInteractive?: boolean;
+  /** Spec source — required in non-interactive mode. */
+  specSource?:
+    | { kind: "remote"; endpoint: string }
+    | { kind: "local"; specFile: string };
+  /** Output folder override (skips the prompt). */
+  outputFolder?: string;
+  /** Package manager override (skips the prompt). Auto-detected when omitted. */
+  packageManager?: PackageManager;
 }
 
 /** Structured result returned after a successful init. */
@@ -1020,40 +1034,59 @@ export async function executeInit(
   // Prompt for spec source — accepts either a remote URL or a local file path.
   // The answer is auto-classified by shape: http(s)://... → remote endpoint;
   // anything else → local file path (spec_file in config).
-  const specInput = await prompts.input({
-    message:
-      "Enter your OpenAPI spec URL (http://...) or local file path (./openapi.json):",
-    default: DEFAULT_CONFIG.api_endpoint,
-    validate: (value) =>
-      value.trim().length > 0
-        ? true
-        : "A spec URL or local file path is required",
-  });
-  const specSource: { kind: "remote"; endpoint: string } | { kind: "local"; specFile: string } =
-    isRemoteSpecUrl(specInput)
+  // Non-interactive mode: use options.specSource or fail with a clear
+  // message naming the missing flag. Issue #43.
+  let specSource:
+    | { kind: "remote"; endpoint: string }
+    | { kind: "local"; specFile: string };
+  if (options.nonInteractive) {
+    if (!options.specSource) {
+      throw new Error(
+        "--non-interactive requires a spec source. Pass --endpoint <url> or --spec-file <path>.",
+      );
+    }
+    specSource = options.specSource;
+  } else {
+    const specInput = await prompts.input({
+      message:
+        "Enter your OpenAPI spec URL (http://...) or local file path (./openapi.json):",
+      default: DEFAULT_CONFIG.api_endpoint,
+      validate: (value) =>
+        value.trim().length > 0
+          ? true
+          : "A spec URL or local file path is required",
+    });
+    specSource = isRemoteSpecUrl(specInput)
       ? { kind: "remote", endpoint: specInput.trim() }
       : { kind: "local", specFile: specInput.trim() };
+  }
 
-  // Prompt for output folder location
-  const outputFolder = await prompts.input({
-    message: "Where should generated API files be placed?",
-    default: DEFAULT_CONFIG.output.folder,
-    validate: (value) =>
-      value.trim().length > 0 ? true : "Output folder is required",
-  });
+  // Prompt for output folder location (or use supplied/default in
+  // non-interactive mode).
+  const outputFolder = options.nonInteractive
+    ? options.outputFolder ?? DEFAULT_CONFIG.output.folder
+    : await prompts.input({
+        message: "Where should generated API files be placed?",
+        default: DEFAULT_CONFIG.output.folder,
+        validate: (value) =>
+          value.trim().length > 0 ? true : "Output folder is required",
+      });
 
-  // Detect package manager and confirm with user
+  // Detect package manager and confirm with user (or use supplied/auto-
+  // detected in non-interactive mode).
   const detectedPm = await detectPackageManager(projectRoot);
-  const pm: PackageManager = await prompts.select<PackageManager>({
-    message: "Which package manager are you using?",
-    choices: [
-      { name: "pnpm", value: "pnpm" },
-      { name: "npm", value: "npm" },
-      { name: "yarn", value: "yarn" },
-      { name: "bun", value: "bun" },
-    ],
-    default: detectedPm,
-  });
+  const pm: PackageManager = options.nonInteractive
+    ? options.packageManager ?? detectedPm
+    : await prompts.select<PackageManager>({
+        message: "Which package manager are you using?",
+        choices: [
+          { name: "pnpm", value: "pnpm" },
+          { name: "npm", value: "npm" },
+          { name: "yarn", value: "yarn" },
+          { name: "bun", value: "bun" },
+        ],
+        default: detectedPm,
+      });
 
   // Verify package manager binary exists
   if (!commandExists(pm)) {
@@ -1078,25 +1111,28 @@ export async function executeInit(
     }
   }
 
-  // Prompt for auth mode
-  const authMode: AuthMode = await prompts.select<AuthMode>({
-    message: "How should auth tokens be attached to requests?",
-    choices: [
-      {
-        name: "Bearer token from localStorage (SPA pattern)",
-        value: "bearer-localstorage",
-      },
-      {
-        name: "Custom — I'll implement my own auth logic",
-        value: "custom",
-      },
-      {
-        name: "None — no auth interceptor needed",
-        value: "none",
-      },
-    ],
-    default: options.authMode,
-  });
+  // Prompt for auth mode (or use the flag-supplied default in non-
+  // interactive mode).
+  const authMode: AuthMode = options.nonInteractive
+    ? options.authMode
+    : await prompts.select<AuthMode>({
+        message: "How should auth tokens be attached to requests?",
+        choices: [
+          {
+            name: "Bearer token from localStorage (SPA pattern)",
+            value: "bearer-localstorage",
+          },
+          {
+            name: "Custom — I'll implement my own auth logic",
+            value: "custom",
+          },
+          {
+            name: "None — no auth interceptor needed",
+            value: "none",
+          },
+        ],
+        default: options.authMode,
+      });
 
   // Build instance config from options and prompts
   let instanceConfig: InstanceConfig = {

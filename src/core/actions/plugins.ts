@@ -120,7 +120,11 @@ function parseSurfaceMetadata(
   const metaMatch = content.match(SURFACE_META_REGEX);
   if (!metaMatch) {
     return {
-      id: constName.toLowerCase().replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase(),
+      // Convert PascalCase → kebab-case BEFORE lower-casing so a name like
+      // `MyCoolSurface` becomes `my-cool-surface`. The previous order
+      // (toLowerCase first) made the kebab regex a no-op, producing
+      // `mycoolsurface`. Issue #25.
+      id: constName.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase(),
       constName,
       variant: "dialog",
       closeOnAction: true,
