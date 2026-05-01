@@ -63,6 +63,10 @@ export async function makeTempPaths(): Promise<{
  * Run the generator end-to-end against an in-memory spec.
  * Skips `openapi-typescript` (the dlx step) so tests don't depend on
  * spawning a child process or being online.
+ *
+ * On any failure (writeFile / generate / readFile), the temp tree is
+ * removed before the error propagates so tests don't leak temp dirs
+ * across failure cases.
  */
 export async function runGenerator(spec: object): Promise<{
 	operations: string;
@@ -70,18 +74,24 @@ export async function runGenerator(spec: object): Promise<{
 	cleanup: () => Promise<void>;
 }> {
 	const { paths, cleanup } = await makeTempPaths();
-	await writeFile(paths.spec, JSON.stringify(spec, null, 2), "utf8");
-
-	await generate({ paths, logger: SILENT_LOGGER, skipTypes: true });
-
-	const operations = await readFile(paths.operations, "utf8");
-	const contracts = await readFile(paths.contracts, "utf8");
-	return { operations, contracts, cleanup };
+	try {
+		await writeFile(paths.spec, JSON.stringify(spec, null, 2), "utf8");
+		await generate({ paths, logger: SILENT_LOGGER, skipTypes: true });
+		const operations = await readFile(paths.operations, "utf8");
+		const contracts = await readFile(paths.contracts, "utf8");
+		return { operations, contracts, cleanup };
+	} catch (err) {
+		await cleanup();
+		throw err;
+	}
 }
 
 /**
  * Run `generateClientFiles` against the given instance config.
  * Returns the contents of each emitted file.
+ *
+ * On any failure, the temp tree is cleaned up before the error
+ * propagates.
  */
 export async function runClientFiles(
 	overrides: Partial<InstanceConfig> = {},
@@ -93,14 +103,19 @@ export async function runClientFiles(
 	cleanup: () => Promise<void>;
 }> {
 	const { paths, cleanup } = await makeTempPaths();
-	await generateClientFiles({
-		paths,
-		instanceConfig: { ...DEFAULT_INSTANCE_CONFIG, ...overrides },
-		logger: SILENT_LOGGER,
-	});
-	const helpers = await readFile(paths.helpers, "utf8");
-	const instance = await readFile(paths.instance, "utf8");
-	const error = await readFile(paths.error, "utf8");
-	const client = await readFile(paths.client, "utf8");
-	return { helpers, instance, error, client, cleanup };
+	try {
+		await generateClientFiles({
+			paths,
+			instanceConfig: { ...DEFAULT_INSTANCE_CONFIG, ...overrides },
+			logger: SILENT_LOGGER,
+		});
+		const helpers = await readFile(paths.helpers, "utf8");
+		const instance = await readFile(paths.instance, "utf8");
+		const error = await readFile(paths.error, "utf8");
+		const client = await readFile(paths.client, "utf8");
+		return { helpers, instance, error, client, cleanup };
+	} catch (err) {
+		await cleanup();
+		throw err;
+	}
 }
