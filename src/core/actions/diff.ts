@@ -3,6 +3,8 @@
  * Returns diff data for UI rendering; does not print anything.
  */
 
+import { createHash } from "node:crypto";
+
 import type { Logger } from "../../adapters/logger-interface.js";
 import {
 	ensureOutputFolder,
@@ -30,6 +32,14 @@ export interface DiffActionOptions {
 
 /**
  * Operation metadata for comparison.
+ *
+ * `signatureHash` is a SHA-256 over a canonicalized projection of the
+ * operation's structural shape (parameters, request body content,
+ * response statuses + content schemas, deprecation, security). Two
+ * operations with the same signatureHash are guaranteed identical for
+ * diff purposes — schema/parameter/response changes flip the hash even
+ * when the surface fields (method, path, summary) stay the same. Issue
+ * #30.
  */
 export interface OperationInfo {
 	operationId: string;
@@ -37,6 +47,7 @@ export interface OperationInfo {
 	path: string;
 	hasRequestBody: boolean;
 	summary: string;
+	signatureHash: string;
 }
 
 /**
@@ -52,7 +63,40 @@ export interface DiffResult {
 }
 
 /**
- * Extracts operations from an OpenAPI spec.
+ * Returns a stable, canonical-JSON projection of the operation's
+ * structural shape — the inputs that actually affect the generated
+ * client. Used as the input to `signatureHash`. Issue #30.
+ */
+function canonicalizeOperationShape(
+	operation: Record<string, unknown>,
+): unknown {
+	const stable = (v: unknown): unknown => {
+		if (v === null || typeof v !== "object") return v;
+		if (Array.isArray(v)) return v.map(stable);
+		const sorted: Record<string, unknown> = {};
+		for (const key of Object.keys(v as Record<string, unknown>).sort()) {
+			sorted[key] = stable((v as Record<string, unknown>)[key]);
+		}
+		return sorted;
+	};
+
+	return stable({
+		// Surface fields kept on top so the hash also flips on path/method
+		// changes, matching the prior behavior.
+		method: operation.method ?? "",
+		// Structural fields that the prior implementation missed entirely.
+		parameters: operation.parameters ?? null,
+		requestBody: operation.requestBody ?? null,
+		responses: operation.responses ?? null,
+		deprecated: operation.deprecated ?? false,
+		security: operation.security ?? null,
+	});
+}
+
+/**
+ * Extracts operations from an OpenAPI spec, including a canonical
+ * `signatureHash` per operation that captures parameter/body/response
+ * shape — not just method/path/summary like before. Issue #30.
  */
 export function extractOperations(spec: unknown): Map<string, OperationInfo> {
 	const operations = new Map<string, OperationInfo>();
@@ -82,12 +126,21 @@ export function extractOperations(spec: unknown): Map<string, OperationInfo> {
 
 			const operationId = operation.operationId as string;
 
+			const shape = canonicalizeOperationShape({
+				...operation,
+				method,
+			});
+			const signatureHash = createHash("sha256")
+				.update(JSON.stringify(shape))
+				.digest("hex");
+
 			operations.set(operationId, {
 				operationId,
 				method,
 				path: pathTemplate,
 				hasRequestBody: Boolean(operation.requestBody),
 				summary: (operation.summary as string) ?? "",
+				signatureHash,
 			});
 		}
 	}
@@ -97,13 +150,18 @@ export function extractOperations(spec: unknown): Map<string, OperationInfo> {
 
 /**
  * Checks if two operations have meaningful differences.
+ *
+ * The previous implementation compared only `method/path/hasRequestBody/
+ * summary`, which missed schema, parameter, and response changes — a
+ * spec drift that breaks the generated client could be reported as
+ * "identical". Now the comparison is driven by `signatureHash`, which
+ * folds in every structural input. Issue #30.
  */
 export function hasChanges(a: OperationInfo, b: OperationInfo): boolean {
 	return (
 		a.method !== b.method ||
 		a.path !== b.path ||
-		a.hasRequestBody !== b.hasRequestBody ||
-		a.summary !== b.summary
+		a.signatureHash !== b.signatureHash
 	);
 }
 

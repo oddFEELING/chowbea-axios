@@ -129,11 +129,14 @@ function parseLine(line: string): EnvVar | null {
 			value = stripQuotes(rightTrimmed);
 		}
 	} else {
-		// Unquoted value -- inline comment is the first unquoted `#`
-		const hashIdx = rightTrimmed.indexOf("#");
-		if (hashIdx !== -1) {
-			value = rightTrimmed.slice(0, hashIdx).trim();
-			comment = rightTrimmed.slice(hashIdx + 1).trim();
+		// Unquoted value. Per dotenv convention, `#` is an inline comment
+		// marker only when preceded by whitespace — otherwise it's part of
+		// the value (e.g. `PRIMARY=#FF0000` for hex colors, or
+		// `URL=https://example.com/page#fragment`). Issue #33.
+		const commentMatch = rightTrimmed.match(/\s+#(.*)$/);
+		if (commentMatch && commentMatch.index !== undefined) {
+			value = rightTrimmed.slice(0, commentMatch.index).trim();
+			comment = commentMatch[1].trim();
 		} else {
 			value = rightTrimmed.trim();
 		}

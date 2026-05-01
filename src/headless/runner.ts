@@ -485,6 +485,12 @@ async function handleInit(args: string[]): Promise<void> {
 				type: "string",
 				default: String(DEFAULT_INSTANCE_CONFIG.timeout),
 			},
+			// Non-interactive flags (#43)
+			"non-interactive": { type: "boolean", default: false },
+			endpoint: { type: "string" },
+			"spec-file": { type: "string" },
+			"output-folder": { type: "string" },
+			"package-manager": { type: "string" },
 			quiet: { type: "boolean", short: "q", default: false },
 			verbose: { type: "boolean", short: "v", default: false },
 		},
@@ -505,6 +511,35 @@ async function handleInit(args: string[]): Promise<void> {
 		return;
 	}
 
+	const VALID_PMS: readonly string[] = ["pnpm", "npm", "yarn", "bun"];
+	const rawPm = values["package-manager"];
+	if (rawPm != null && !VALID_PMS.includes(rawPm)) {
+		console.error(`Invalid package-manager: "${rawPm}". Must be one of: ${VALID_PMS.join(", ")}`);
+		process.exitCode = 1;
+		return;
+	}
+
+	// Non-interactive mode (#43): construct the spec source from flags. We
+	// also auto-enable non-interactive mode when stdin isn't a TTY so CI
+	// jobs without an interactive terminal fail with a clear message
+	// instead of hanging on inquirer.
+	const isTTY = Boolean(process.stdin.isTTY && process.stdout.isTTY);
+	const nonInteractive = (values["non-interactive"] ?? false) || !isTTY;
+
+	let specSource: InitActionOptions["specSource"];
+	if (values.endpoint && values["spec-file"]) {
+		console.error(
+			"Cannot pass both --endpoint and --spec-file; choose one.",
+		);
+		process.exitCode = 1;
+		return;
+	}
+	if (values.endpoint) {
+		specSource = { kind: "remote", endpoint: values.endpoint };
+	} else if (values["spec-file"]) {
+		specSource = { kind: "local", specFile: values["spec-file"] };
+	}
+
 	const options: InitActionOptions = {
 		force: values.force ?? false,
 		skipScripts: values["skip-scripts"] ?? false,
@@ -519,7 +554,23 @@ async function handleInit(args: string[]): Promise<void> {
 		authMode: rawAuthMode as AuthMode,
 		withCredentials: values["with-credentials"] ?? DEFAULT_INSTANCE_CONFIG.with_credentials,
 		timeout: parseInt(values.timeout ?? String(DEFAULT_INSTANCE_CONFIG.timeout), 10),
+		nonInteractive,
+		specSource,
+		outputFolder: values["output-folder"],
+		packageManager: rawPm as InitActionOptions["packageManager"],
 	};
+
+	// Surface a clearer error when running non-interactively without a
+	// spec source — better than letting `executeInit` throw inside an
+	// inquirer call that fails mysteriously in non-TTY contexts. Issue #43.
+	if (nonInteractive && !specSource) {
+		console.error(
+			"chowbea-axios init in non-interactive mode requires either --endpoint <url> or --spec-file <path>.\n" +
+				"(Detected non-TTY: " + (!isTTY) + "; --non-interactive: " + (values["non-interactive"] ?? false) + ".)",
+		);
+		process.exitCode = 1;
+		return;
+	}
 
 	const prompts = createHeadlessPromptProvider();
 
