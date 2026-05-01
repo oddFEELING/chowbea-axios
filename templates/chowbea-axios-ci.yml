@@ -2,12 +2,20 @@
 # Fails the PR check if generated code is out of date.
 #
 # Setup:
-#   1. Add your staging OpenAPI spec URL as a GitHub repository secret:
-#      Settings > Secrets > Actions > New repository secret
-#      Name: STAGING_API_ENDPOINT
-#      Value: https://your-staging-api.com/openapi.json
+#   1. Add your staging OpenAPI spec URL as a GitHub repository secret
+#      OR a repo variable:
+#        Settings > Secrets and variables > Actions > New repository secret
+#        Name:  STAGING_API_ENDPOINT
+#        Value: https://your-staging-api.com/openapi.json
+#      Use a *secret* when the URL contains credentials; otherwise a
+#      repo *variable* is fine and easier to inspect.
 #
 #   2. Ensure chowbea-axios is listed as a devDependency in package.json.
+#
+#   3. (Optional) If your project uses pnpm, yarn, or bun instead of npm,
+#      replace the "Setup Node + npm install" / "Regenerate" steps below
+#      with the equivalent for your package manager. The default uses
+#      npm because it ships with every Node.js install.
 
 name: Validate Generated API Client
 
@@ -15,25 +23,43 @@ on:
   pull_request:
     types: [opened, synchronize]
 
+# Default-deny permissions. Add scopes only if a step needs more
+# (e.g. `pull-requests: write` to comment on PRs).
+permissions:
+  contents: read
+
+# Cancel in-flight runs of the same workflow on the same branch when a
+# new commit is pushed. Saves CI minutes and avoids stale results.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   validate-generated-code:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - name: Checkout PR branch
         uses: actions/checkout@v4
 
-      - name: Setup Bun
-        uses: oven-sh/setup-bun@v2
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
 
       - name: Install dependencies
-        run: bun install --frozen-lockfile
+        run: npm ci
 
       - name: Regenerate from staging API
-        run: bunx chowbea-axios fetch --endpoint "${{ secrets.STAGING_API_ENDPOINT }}" --force --quiet
+        run: >
+          npx chowbea-axios fetch
+          --endpoint "${{ vars.STAGING_API_ENDPOINT || secrets.STAGING_API_ENDPOINT }}"
+          --force --quiet
 
       - name: Check for differences in generated code
         run: |
-          if git diff --exit-code -- '**/_generated/'; then
+          if git diff --exit-code -- 'services/api/_generated/' '**/_generated/'; then
             echo "Generated code is up to date with staging."
           else
             echo ""
@@ -48,6 +74,6 @@ jobs:
             echo ""
             echo "Then commit the updated files."
             echo ""
-            git diff --stat -- '**/_generated/'
+            git diff --stat -- 'services/api/_generated/' '**/_generated/'
             exit 1
           fi
