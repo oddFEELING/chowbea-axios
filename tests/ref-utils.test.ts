@@ -36,24 +36,49 @@ describe("resolveRef", () => {
 		expect(resolveRef(123 as unknown as string, spec)).toBeUndefined();
 	});
 
-	// Issue #19: JSON Pointer escape sequences ~0 (~) and ~1 (/) are not decoded.
-	it.fails("#19: decodes ~1 to '/' per RFC 6901", () => {
+	// Issue #19 (FIXED): JSON Pointer escape sequences ~0 (~) and ~1 (/) are
+	// now decoded per RFC 6901.
+	it("#19 (FIXED): decodes ~1 to '/' per RFC 6901", () => {
 		const refs = {
 			paths: {
 				"/users/{id}": { get: { operationId: "x" } },
 			},
 		};
-		// `#/paths/~1users~1{id}/get` should resolve to the GET operation.
+		// `#/paths/~1users~1{id}/get` resolves to the GET operation.
 		expect(resolveRef("#/paths/~1users~1{id}/get", refs)).toEqual({
 			operationId: "x",
 		});
 	});
 
-	it.fails("#19: decodes ~0 to '~' per RFC 6901", () => {
+	it("#19 (FIXED): decodes ~0 to '~' per RFC 6901", () => {
 		const refs = { components: { schemas: { "weird~name": { type: "string" } } } };
 		expect(resolveRef("#/components/schemas/weird~0name", refs)).toEqual({
 			type: "string",
 		});
+	});
+
+	it("#19 (FIXED): handles RFC 6901's ~01 over-decoding hazard correctly", () => {
+		// Per RFC 6901 §4: `~01` must decode to `~1`, not to `/`.
+		// A naive "do ~0 first" implementation would produce `~1` → `/` (wrong).
+		// The correct order is `~1` → `/`, then `~0` → `~`, leaving the RFC
+		// example `~01` as `~1`.
+		const refs = { foo: { "~1": "found" } };
+		expect(resolveRef("#/foo/~01", refs)).toBe("found");
+	});
+
+	// Defense in depth: don't traverse prototype machinery via JSON Pointer.
+	it("refuses prototype-pollution segments", () => {
+		const spec = {};
+		expect(resolveRef("#/__proto__", spec)).toBeUndefined();
+		expect(resolveRef("#/constructor", spec)).toBeUndefined();
+		expect(resolveRef("#/__proto__/polluted", spec)).toBeUndefined();
+	});
+
+	// Even when an inherited property exists, refuse to surface it.
+	it("only resolves own properties", () => {
+		const spec = Object.create({ inherited: "from-prototype" });
+		// `inherited` is on the prototype, not the spec itself.
+		expect(resolveRef("#/inherited", spec)).toBeUndefined();
 	});
 });
 
@@ -64,6 +89,11 @@ describe("refName", () => {
 
 	it("falls back to the full ref for unparseable inputs", () => {
 		expect(refName("not-a-ref")).toBe("not-a-ref");
+	});
+
+	it("decodes RFC 6901 escapes in the displayed name", () => {
+		expect(refName("#/components/schemas/weird~0name")).toBe("weird~name");
+		expect(refName("#/paths/~1users~1{id}")).toBe("/users/{id}");
 	});
 });
 

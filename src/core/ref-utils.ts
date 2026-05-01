@@ -31,19 +31,51 @@ export const MAX_SCHEMA_DEPTH = 8;
 // ---------------------------------------------------------------------------
 
 /**
+ * Per [RFC 6901 §4](https://datatracker.ietf.org/doc/html/rfc6901#section-4):
+ * "decoding any escaped character sequence" requires transforming `~1` to `/`
+ * **before** transforming `~0` to `~`. Reversing the order would incorrectly
+ * decode `~01` to `/` (via `~0` → `~`, then `~1` → `/`) instead of the
+ * required `~1`.
+ */
+function unescapeJsonPointerSegment(segment: string): string {
+	return segment.replace(/~1/g, "/").replace(/~0/g, "~");
+}
+
+/**
+ * Property names that, if followed via bracket access, would resolve to
+ * built-in prototype machinery rather than spec content. Refusing them at
+ * the resolver eliminates a class of bugs (and a faint prototype-pollution
+ * surface) when handling untrusted specs.
+ */
+const FORBIDDEN_REF_SEGMENTS = new Set(["__proto__", "prototype", "constructor"]);
+
+/**
  * Follows a `$ref` JSON pointer (e.g. `#/components/schemas/Foo`) through
  * the spec object and returns the resolved value.
+ *
+ * Decodes RFC 6901 escape sequences (`~1` → `/`, `~0` → `~`) so refs
+ * like `#/paths/~1users~1{id}/get` resolve correctly. Issue #19.
  */
 export function resolveRef(ref: string, spec: unknown): unknown {
 	if (typeof ref !== "string" || !ref.startsWith("#/")) {
 		return undefined;
 	}
 
-	const segments = ref.slice(2).split("/");
+	const segments = ref.slice(2).split("/").map(unescapeJsonPointerSegment);
 	let current: unknown = spec;
 
 	for (const segment of segments) {
 		if (current === null || current === undefined || typeof current !== "object") {
+			return undefined;
+		}
+		// Refuse prototype-machinery segments. A spec author writing
+		// `#/__proto__` would otherwise resolve to Object.prototype.
+		if (FORBIDDEN_REF_SEGMENTS.has(segment)) {
+			return undefined;
+		}
+		// Use Object.hasOwn to avoid traversing inherited properties even if
+		// the resolved object somehow has a prototype-chain match.
+		if (!Object.hasOwn(current as object, segment)) {
 			return undefined;
 		}
 		current = (current as Record<string, unknown>)[segment];
@@ -71,12 +103,14 @@ export function resolveObject(
 }
 
 /**
- * Extracts the last segment of a `$ref` path as a human-readable name.
+ * Extracts the last segment of a `$ref` path as a human-readable name,
+ * decoded per RFC 6901 (so `weird~1name` becomes `weird/name`).
  * e.g. `#/components/schemas/UserDto` -> `UserDto`
  */
 export function refName(ref: string): string {
 	const segments = ref.split("/");
-	return segments[segments.length - 1] ?? ref;
+	const last = segments[segments.length - 1] ?? ref;
+	return unescapeJsonPointerSegment(last);
 }
 
 // ---------------------------------------------------------------------------
