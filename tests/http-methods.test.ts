@@ -25,23 +25,17 @@ describe("HTTP_METHODS shared constants (#31)", () => {
 		]);
 	});
 
-	it("GENERATABLE_HTTP_METHODS is the subset that the runtime client emits today", () => {
-		expect([...GENERATABLE_HTTP_METHODS]).toEqual([
-			"get",
-			"post",
-			"put",
-			"delete",
-			"patch",
-		]);
+	it("GENERATABLE_HTTP_METHODS now matches HTTP_METHODS — all 8 OpenAPI methods are generatable (#31 fully resolved)", () => {
+		expect([...GENERATABLE_HTTP_METHODS]).toEqual([...HTTP_METHODS]);
 	});
 
-	it("isGeneratableMethod recognizes the runtime-client subset", () => {
-		expect(isGeneratableMethod("get")).toBe(true);
-		expect(isGeneratableMethod("patch")).toBe(true);
-		expect(isGeneratableMethod("head")).toBe(false);
-		expect(isGeneratableMethod("options")).toBe(false);
-		expect(isGeneratableMethod("trace")).toBe(false);
+	it("isGeneratableMethod returns true for every OpenAPI method, false for unrecognized ones", () => {
+		for (const method of HTTP_METHODS) {
+			expect(isGeneratableMethod(method)).toBe(true);
+		}
+		// Defensive anchor: unrecognized methods (typos, non-OpenAPI-3) fail.
 		expect(isGeneratableMethod("connect")).toBe(false);
+		expect(isGeneratableMethod("FOO")).toBe(false);
 	});
 });
 

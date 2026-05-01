@@ -26,17 +26,25 @@
 ## Quick Start
 
 ```bash
-# Initialize and configure
+# Initialize and configure (interactive)
 npx chowbea-axios init
 
 # Fetch spec and generate client
 npx chowbea-axios fetch
 ```
 
+Or with your preferred package manager:
+
+```bash
+pnpm dlx chowbea-axios init
+yarn dlx chowbea-axios init
+bunx chowbea-axios init
+```
+
 Then import and use:
 
 ```typescript
-import { api } from "./services/api/api.client";
+import { api } from "./src/api/api.client";
 
 const { data, error } = await api.op.getUserById({ id: "123" });
 
@@ -51,17 +59,27 @@ console.log(data.name); // ✨ Fully typed
 - **Full autocomplete** — Every endpoint, parameter, and response
 - **Result-based errors** — `{ data, error }` instead of try/catch
 - **Watch mode** — Auto-regenerate when your spec changes
+- **YAML or JSON** — Both spec formats accepted at every entry point
+- **Interactive TUI** — Run `chowbea-axios` (no args) for the dashboard
+- **CI-friendly** — `--non-interactive` mode plus a hardened workflow template
 
 ## What Gets Generated
 
+The default output folder is `src/api/`. Override it via `output.folder` in `api.config.toml`.
+
 ```
-services/api/
-├── _generated/
-│   ├── api.types.ts        # All TypeScript types
-│   └── api.operations.ts   # Typed operation methods
-├── api.client.ts           # Your API client (editable)
-├── api.instance.ts         # Axios instance (editable)
-└── api.helpers.ts          # Type helpers (editable)
+src/api/
+├── _internal/
+│   ├── openapi.json         # Cached spec (always JSON)
+│   └── .api-cache.json      # Cache metadata (hash, timestamp)
+├── _generated/              # Always overwritten — do not edit
+│   ├── api.types.ts         # OpenAPI-typed paths/components/operations
+│   ├── api.operations.ts    # Typed apiClient.op.<id>(...) methods
+│   └── api.contracts.ts     # Concrete interfaces (cmd+click navigation)
+├── api.client.ts            # Typed HTTP client (editable, generated once)
+├── api.instance.ts          # Axios instance + auth interceptor (editable, generated once)
+├── api.error.ts             # Result-based error handling (editable, generated once)
+└── api.helpers.ts           # Path-based type helpers (editable, generated once)
 ```
 
 ## Commands
@@ -69,12 +87,75 @@ services/api/
 | Command | Description |
 | ------- | ----------- |
 | `init` | Interactive setup — creates config and base files |
-| `fetch` | Fetch spec from endpoint and generate types |
+| `fetch` | Fetch spec from endpoint (or local file) and generate types |
 | `generate` | Generate from cached/local spec |
-| `watch` | Watch for spec changes and auto-regenerate |
-| `status` | Show current config and cache status |
-| `validate` | Validate your OpenAPI spec |
-| `diff` | Compare specs and show changes |
+| `watch` | Watch for spec changes and auto-regenerate (with backoff on failures) |
+| `status` | Show current config, cache, and generated-file status |
+| `validate` | Validate your OpenAPI spec — 7 categories, severity-classified |
+| `diff` | Compare cached vs new spec; flags schema/parameter/response changes |
+| `plugins` | Manage Vite codegen plugins (Surfaces, Side Panels) |
+
+Run `chowbea-axios <command> --help` for command-specific flags.
+
+## Interactive Dashboard
+
+Running `chowbea-axios` with **no command** launches an OpenTUI dashboard with screens for fetch, generate, diff, validate, watch, plugins, env management, and an endpoint inspector. Tabs survive screen navigation, and processes (e.g. `npm run dev`) can be run alongside in the process tab.
+
+The dashboard requires [Bun](https://bun.sh). When invoked under Node, the CLI re-launches itself under Bun automatically. If Bun isn't installed, the CLI falls back to headless mode and prints a hint.
+
+## Authentication
+
+Configure how the **generated client** attaches auth tokens via the `[instance]` block in `api.config.toml`:
+
+```toml
+[instance]
+auth_mode = "bearer-localstorage"   # SPA pattern — reads from localStorage
+# auth_mode = "custom"              # TODO interceptor — implement your own
+# auth_mode = "none"                # No interceptor
+token_key = "auth-token"            # localStorage key (bearer-localstorage only)
+with_credentials = false            # Send cookies cross-origin (default: false)
+timeout = 30000
+base_url_env = "API_BASE_URL"       # Env var holding the base URL
+env_accessor = "process.env"        # or "import.meta.env" for Vite
+```
+
+For **fetching the spec itself** with HTTP Basic Auth (e.g. private staging endpoints), add a `[fetch.auth]` block:
+
+```toml
+[fetch.auth]
+type = "basic"
+username = "$SWAGGER_USER"          # $VAR or ${VAR} env interpolation
+password = "$SWAGGER_PASS"
+```
+
+When the env vars aren't set, the CLI prompts interactively. In CI, set them in the environment.
+
+## CI Integration
+
+The `init` wizard offers to scaffold `.github/workflows/chowbea-axios-ci.yml` — a hardened workflow that re-fetches your spec on every PR and fails when the generated client is out of date. The template includes:
+
+- `permissions: contents: read` (default-deny)
+- `concurrency` cancel-in-progress
+- Node 22 + npm cache (works for every package manager — see comments for bun/pnpm/yarn variants)
+- `vars` or `secrets` fallback for `STAGING_API_ENDPOINT`
+
+For non-interactive bootstrapping (e.g. project starters):
+
+```bash
+chowbea-axios init --non-interactive \
+  --endpoint https://staging.example.com/openapi.json \
+  --output-folder src/api \
+  --package-manager npm
+```
+
+## Vite Plugins (optional)
+
+`chowbea-axios/vite` exposes two codegen plugins for Vite projects:
+
+- `surfacesCodegen()` — auto-discovers `*.surface.tsx` files and generates a typed barrel
+- `sidepanelsCodegen()` — same for `*.panel.tsx` files
+
+Scaffold them via `chowbea-axios init --with-vite-plugins` or `chowbea-axios plugins --setup`. See [docs](https://axios.chowbea.com) for the full registry pattern.
 
 ---
 
