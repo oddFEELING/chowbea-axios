@@ -28,7 +28,8 @@
     "dev": "tsc --watch",
     "clean": "node -e \"require('fs').rmSync('dist',{recursive:true,force:true})\"",
     "prepublishOnly": "npm run build",
-    "test": "echo \"No tests configured\""
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
     "@inquirer/prompts": "^7.0.0",
@@ -42,7 +43,8 @@
     "@types/node": "^22.0.0",
     "@types/react": "^19.2.14",
     "typescript": "^5.9.0",
-    "vite": "^6.0.0"
+    "vite": "^6.0.0",
+    "vitest": "^4.1.5"
   },
   "peerDependencies": {
     "vite": ">=5.0.0"
