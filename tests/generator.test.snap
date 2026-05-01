@@ -984,7 +984,7 @@ exports[`generator: end-to-end snapshots > edge-cases — kebab/snake collision,
 /* ~ =================================== ~ */
 
 /**
-  * A user. Description containing */ injection attempt — issue #14.
+  * A user. Description containing *\\/ injection attempt — issue #14.
  * Schema: User
  */
 export interface User {
@@ -1031,7 +1031,7 @@ export type List_itemsResponse200 = {
 /** Response: GET /items (happy path) */
 export type List_itemsResponse = List_itemsResponse200;
 
-/** Response: POST /items (201 - Created. Description with */ in it.) */
+/** Response: POST /items (201 - Created. Description with *\\/ in it.) */
 export type Create_itemResponse201 = {
 	id?: number;
 	tags?: string[];
@@ -1161,7 +1161,7 @@ type RequestConfig<Q> = Omit<AxiosRequestConfig, "params"> & {
 export const createOperations = (apiClient: any) => ({
   /**
    * Get user by id (kebab-case operationId — issue #13)
-   * Multi-line description containing */ comment-break attempt (issue #14).
+   * Multi-line description containing *\\/ comment-break attempt (issue #14).
    * 
    * @operationId get-user
    * @method GET
@@ -1170,7 +1170,7 @@ export const createOperations = (apiClient: any) => ({
   "get-user": (pathParams: Get_userPathParams, config?: AxiosRequestConfig): Promise<Result<Get_userResponse>> => apiClient.get("/users/{id}", pathParams, config),
 
   /**
-   * Wildcard media type (*/*) — relies on pickJsonContent fallback
+   * Wildcard media type (*\\/*) — relies on pickJsonContent fallback
    * 
    * @operationId list-items
    * @method GET

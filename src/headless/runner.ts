@@ -615,33 +615,33 @@ export async function runHeadless(
 	// Pre-cache openapi-typescript for fetch/generate commands
 	if (command === "fetch" || command === "generate") {
 		const { findProjectRoot } = await import("../core/config.js");
-		const { detectPackageManager, getDlxCommand } = await import(
+		const { detectPackageManager, getDlxCommand, resolveCommand } = await import(
 			"../core/pm.js"
 		);
 		try {
 			const projectRoot = await findProjectRoot();
 			const pm = await detectPackageManager(projectRoot);
 			const [dlxCmd, ...dlxArgs] = getDlxCommand(pm);
+			// Drop `shell: true` (Node 24 DEP0190); resolveCommand handles
+			// Windows .cmd shims. Issue #16.
 			const check = spawnSync(
-				dlxCmd,
+				resolveCommand(dlxCmd),
 				[...dlxArgs, "openapi-typescript", "--version"],
 				{
 					cwd: projectRoot,
 					stdio: "pipe",
 					timeout: 30_000,
-					shell: true,
 				},
 			);
 			if (check.status !== 0) {
 				// Force download by running --help
 				spawnSync(
-					dlxCmd,
+					resolveCommand(dlxCmd),
 					[...dlxArgs, "openapi-typescript", "--help"],
 					{
 						cwd: projectRoot,
 						stdio: "pipe",
 						timeout: 60_000,
-						shell: true,
 					},
 				);
 			}
