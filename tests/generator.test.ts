@@ -92,14 +92,20 @@ describe("generator: known-bug regression markers", () => {
 	// the same PR that ships the fix. This keeps the test file as a record
 	// of which bugs are still latent vs resolved.
 
-	it.fails("#13: operation keys with `-` should be quoted in api.operations.ts", async () => {
+	it("#13 (FIXED): operation keys with `-` are quoted in api.operations.ts", async () => {
 		const spec = await loadFixture("edge-cases.json");
 		const { operations, cleanup } = await runGenerator(spec);
 		try {
-			// Today the generator emits `get-user: (...) => …` (unquoted).
-			// After fix: `"get-user": (...) => …`.
+			// Bare `get-user:` would be invalid TS; quoted `"get-user":` is correct.
 			expect(operations).not.toMatch(/^\s+get-user:/m);
 			expect(operations).toMatch(/^\s+"get-user":/m);
+			// Also covers the other dashed operationIds in the fixture.
+			// (`head-user` is excluded — HEAD method is skipped by the generator
+			// today; that's tracked separately as issue #31.)
+			expect(operations).toMatch(/^\s+"list-items":/m);
+			expect(operations).toMatch(/^\s+"create-item":/m);
+			expect(operations).toMatch(/^\s+"upload-file":/m);
+			expect(operations).toMatch(/^\s+"get-dictionary":/m);
 		} finally {
 			await cleanup();
 		}
@@ -125,25 +131,72 @@ describe("generator: known-bug regression markers", () => {
 		}
 	});
 
-	it.fails("#15: enum string values containing `\"` or `\\` must be properly escaped", async () => {
+	it("#15 (FIXED): enum string values containing `\"` or `\\` are properly escaped", async () => {
 		const spec = await loadFixture("edge-cases.json");
 		const { contracts, cleanup } = await runGenerator(spec);
 		try {
-			// Today emits `name: "a"b" | "c\d" | "normal"` (broken).
-			// After fix, JSON.stringify-escaped: `name: "a\"b" | "c\\d" | "normal"`.
+			// Spec enum: ["a\"b", "c\\d", "normal"]
+			// Should emit JSON.stringify-escaped TS literals: "a\"b" | "c\\d" | "normal"
 			expect(contracts).toMatch(/"a\\"b"/);
 			expect(contracts).toMatch(/"c\\\\d"/);
+			expect(contracts).toMatch(/"normal"/);
 		} finally {
 			await cleanup();
 		}
 	});
 
-	it.fails("#18: distinct operationIds that sanitize to the same identifier must be detected", async () => {
-		// The fixture has both `get-user` (GET) and `get_user` (PATCH) — both
-		// sanitize to `get_user`. After fix, this should throw or warn at
-		// generation time. Today it silently collapses contracts.
-		const spec = await loadFixture("edge-cases.json");
-		await expect(runGenerator(spec)).rejects.toThrow(/collision|duplicate/i);
+	it("#18 (FIXED): distinct operationIds that sanitize to the same identifier throw at generate time", async () => {
+		// `get-user` and `get_user` both sanitize to `get_user`.
+		const spec = {
+			openapi: "3.0.3",
+			info: { title: "Collision", version: "1.0.0" },
+			paths: {
+				"/users": {
+					get: {
+						operationId: "get-user",
+						responses: { "200": { description: "OK" } },
+					},
+					post: {
+						operationId: "get_user",
+						responses: { "200": { description: "OK" } },
+					},
+				},
+			},
+		};
+		await expect(runGenerator(spec)).rejects.toThrow(
+			/OperationId collision/,
+		);
+	});
+
+	it("#18 (FIXED): collision error names every colliding pair", async () => {
+		const spec = {
+			openapi: "3.0.3",
+			info: { title: "Collision", version: "1.0.0" },
+			paths: {
+				"/a": {
+					get: { operationId: "do-thing", responses: { "200": { description: "OK" } } },
+					post: { operationId: "do_thing", responses: { "200": { description: "OK" } } },
+				},
+				"/b": {
+					get: { operationId: "list a b", responses: { "200": { description: "OK" } } },
+					post: { operationId: "list-a-b", responses: { "200": { description: "OK" } } },
+				},
+			},
+		};
+		await expect(runGenerator(spec)).rejects.toThrow(/do-thing.*do_thing/s);
+		await expect(runGenerator(spec)).rejects.toThrow(/list a b.*list-a-b/s);
+	});
+
+	it("#18 (FIXED): unique operationIds still generate cleanly", async () => {
+		const spec = await loadFixture("petstore.json");
+		const { operations, contracts, cleanup } = await runGenerator(spec);
+		try {
+			// Sanity: petstore has no collisions, so generation succeeds.
+			expect(operations.length).toBeGreaterThan(0);
+			expect(contracts.length).toBeGreaterThan(0);
+		} finally {
+			await cleanup();
+		}
 	});
 
 	it.fails("#26: recursive types should reference themselves, not collapse to unknown[]", async () => {
