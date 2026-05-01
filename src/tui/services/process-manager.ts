@@ -57,6 +57,14 @@ class ProcessManager {
 			[pathKey]: `${binDir}${delimiter}${existingPath}`,
 		};
 
+		// `shell: true` is intentional and unavoidable here: `entry.command` is
+		// a user-supplied npm/pnpm/yarn/bun script string from the consumer's
+		// own package.json (e.g. `npm run dev` or `cd foo && bun start`).
+		// Running these requires shell-level parsing of `&&`, redirections,
+		// env-var assignments, and PATHEXT resolution. This is the legitimate
+		// use of shell:true; the deprecation in DEP0190 targets static-arg
+		// invocations elsewhere in the codebase, which have been removed.
+		// Issue #16.
 		const child = spawn(entry.command, [], {
 			cwd: projectRoot,
 			env,

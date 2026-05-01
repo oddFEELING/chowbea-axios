@@ -67,26 +67,30 @@ export function formatStatusOutput(result: StatusResult): string {
 		);
 	}
 
-	// Endpoint statistics
+	// Endpoint statistics — render only the method buckets that have
+	// non-zero counts, in canonical order. Includes OPTIONS/HEAD/TRACE
+	// for issue #31.
 	if (result.methodCounts && result.methodCounts.total > 0) {
 		lines.push(
 			`${INDENT}${pc.dim("endpoints:")} ${pc.yellow(String(result.methodCounts.total))} total`,
 		);
 		const methods: string[] = [];
-		if (result.methodCounts.get > 0)
-			methods.push(`GET: ${pc.yellow(String(result.methodCounts.get))}`);
-		if (result.methodCounts.post > 0)
-			methods.push(`POST: ${pc.yellow(String(result.methodCounts.post))}`);
-		if (result.methodCounts.put > 0)
-			methods.push(`PUT: ${pc.yellow(String(result.methodCounts.put))}`);
-		if (result.methodCounts.delete > 0)
-			methods.push(
-				`DELETE: ${pc.yellow(String(result.methodCounts.delete))}`,
-			);
-		if (result.methodCounts.patch > 0)
-			methods.push(
-				`PATCH: ${pc.yellow(String(result.methodCounts.patch))}`,
-			);
+		const ordered: Array<[keyof typeof result.methodCounts, string]> = [
+			["get", "GET"],
+			["post", "POST"],
+			["put", "PUT"],
+			["patch", "PATCH"],
+			["delete", "DELETE"],
+			["options", "OPTIONS"],
+			["head", "HEAD"],
+			["trace", "TRACE"],
+		];
+		for (const [key, label] of ordered) {
+			const count = result.methodCounts[key];
+			if (typeof count === "number" && count > 0) {
+				methods.push(`${label}: ${pc.yellow(String(count))}`);
+			}
+		}
 		lines.push(`${INDENT}${methods.join("  ")}`);
 	}
 	lines.push("");

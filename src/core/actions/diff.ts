@@ -18,6 +18,7 @@ import {
 	loadCacheMetadata,
 	loadLocalSpec,
 } from "../fetcher.js";
+import { HTTP_METHODS } from "../http-methods.js";
 
 /**
  * Options for the diff action.
@@ -70,7 +71,9 @@ export function extractOperations(spec: unknown): Map<string, OperationInfo> {
 	}
 
 	for (const [pathTemplate, pathItem] of Object.entries(paths)) {
-		for (const method of ["get", "post", "put", "delete", "patch"]) {
+		// Walk all 8 HTTP methods so additions/removals of HEAD/OPTIONS/
+		// TRACE operations show up in the diff. Issue #31.
+		for (const method of HTTP_METHODS) {
 			const operation = pathItem[method] as
 				| Record<string, unknown>
 				| undefined;

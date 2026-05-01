@@ -86,10 +86,34 @@ export function getRunCommand(pm: PackageManager): string {
 }
 
 /**
+ * On Windows, common JS package managers (npm, npx, pnpm, yarn, bun, bunx)
+ * ship as `.cmd` shims rather than native `.exe` files. When `child_process`
+ * is invoked without `shell: true`, Node skips PATHEXT resolution, so a
+ * bare command name like `"npm"` fails to launch the shim.
+ *
+ * This helper appends `.cmd` on Windows when the input has no path separator
+ * and no executable extension, letting callers drop `shell: true` (which is
+ * deprecated in Node 24, DEP0190) without losing Windows compatibility.
+ *
+ * On non-Windows platforms, returns the input unchanged.
+ *
+ * Issue #16.
+ */
+export function resolveCommand(cmd: string): string {
+	if (process.platform !== "win32") return cmd;
+	if (cmd.includes("/") || cmd.includes("\\")) return cmd;
+	if (/\.(exe|cmd|bat|ps1)$/i.test(cmd)) return cmd;
+	return `${cmd}.cmd`;
+}
+
+/**
  * Checks whether a command exists on the system PATH.
- * Uses shell: true so Windows can resolve .exe/.cmd wrappers.
+ *
+ * Internal callers only — `cmd` must be a static string. We deliberately
+ * do not pass `shell: true` (deprecated by Node 24 / DEP0190); Windows
+ * `.cmd` shims are handled by `resolveCommand`.
  */
 export function commandExists(cmd: string): boolean {
-	const result = spawnSync(cmd, ["--version"], { stdio: "pipe", shell: true });
+	const result = spawnSync(resolveCommand(cmd), ["--version"], { stdio: "pipe" });
 	return result.status === 0;
 }
