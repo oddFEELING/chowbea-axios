@@ -5,9 +5,73 @@
 
 import { createHash } from "node:crypto";
 import { access, readFile, writeFile } from "node:fs/promises";
+import { parse as parseYaml } from "yaml";
 
 import { NetworkError, SpecNotFoundError } from "./errors.js";
 import type { Logger } from "../adapters/logger-interface.js";
+
+/**
+ * Parses an OpenAPI spec from raw text. Accepts both JSON and YAML.
+ *
+ * Strategy:
+ * - If `sourceHint` ends in `.yaml` / `.yml`, parse as YAML directly.
+ * - Otherwise try JSON first (the most common case and the format of the
+ *   cache file), then fall back to YAML on parse failure.
+ *
+ * Throws an `Error` with a clear message if neither parser accepts the
+ * content. Issue #23.
+ */
+export function parseSpecContent(content: string, sourceHint?: string): unknown {
+	const isYamlExt = sourceHint != null && /\.ya?ml$/i.test(sourceHint);
+
+	if (isYamlExt) {
+		try {
+			return parseYaml(content);
+		} catch (err) {
+			throw new Error(
+				`Failed to parse YAML spec${sourceHint ? ` at ${sourceHint}` : ""}: ${
+					err instanceof Error ? err.message : String(err)
+				}`,
+			);
+		}
+	}
+
+	// Default: JSON first (cache files and most public endpoints), YAML
+	// fallback (private specs hand-authored in YAML).
+	try {
+		return JSON.parse(content);
+	} catch (jsonErr) {
+		try {
+			return parseYaml(content);
+		} catch (yamlErr) {
+			throw new Error(
+				`Failed to parse spec${sourceHint ? ` at ${sourceHint}` : ""} as JSON or YAML. ` +
+					`JSON error: ${jsonErr instanceof Error ? jsonErr.message : String(jsonErr)}. ` +
+					`YAML error: ${yamlErr instanceof Error ? yamlErr.message : String(yamlErr)}.`,
+			);
+		}
+	}
+}
+
+/**
+ * Normalizes a spec buffer to a JSON-encoded form. Parses with auto-
+ * detection (JSON or YAML), then re-encodes as canonical JSON.
+ *
+ * The downstream pipeline (cache file, generator, diff, validate) all
+ * expect JSON, so we convert at the parse boundary. The `spec` object is
+ * also returned so callers don't need to re-parse.
+ *
+ * Issue #23.
+ */
+export function normalizeSpecBuffer(buffer: Buffer, sourceHint?: string): {
+	spec: unknown;
+	jsonBuffer: Buffer;
+} {
+	const content = buffer.toString("utf8");
+	const spec = parseSpecContent(content, sourceHint);
+	const jsonBuffer = Buffer.from(JSON.stringify(spec, null, 2), "utf8");
+	return { spec, jsonBuffer };
+}
 
 /**
  * Cache metadata stored in .api-cache.json
@@ -217,19 +281,25 @@ export async function fetchOpenApiSpec(options: {
 			}
 
 			const arrayBuffer = await response.arrayBuffer();
-			const buffer = Buffer.from(arrayBuffer);
-			const hash = computeHash(buffer);
+			const rawBuffer = Buffer.from(arrayBuffer);
+
+			// Normalize to JSON so the cache file and downstream parsers
+			// always see JSON, even when the endpoint serves YAML. Issue #23.
+			// We pass the endpoint as a hint so YAML extensions are picked up
+			// directly; for unknown content-types we fall back to JSON-then-YAML.
+			const { jsonBuffer } = normalizeSpecBuffer(rawBuffer, endpoint);
+			const hash = computeHash(jsonBuffer);
 
 			// Check if content has changed
 			const hasChanged = force || !existingCache || existingCache.hash !== hash;
 
 			logger.debug(
-				{ hash, hasChanged, bytes: buffer.length },
+				{ hash, hasChanged, bytes: jsonBuffer.length },
 				"Spec fetched successfully"
 			);
 
 			return {
-				buffer,
+				buffer: jsonBuffer,
 				hash,
 				hasChanged,
 				fromCache: false,
@@ -307,13 +377,14 @@ export async function saveSpec(options: {
 }
 
 /**
- * Checks if the local spec exists and is valid.
+ * Checks if the local spec exists and is parseable as JSON or YAML.
+ * Issue #23 (was JSON-only).
  */
 export async function hasLocalSpec(specPath: string): Promise<boolean> {
 	try {
 		await access(specPath);
 		const content = await readFile(specPath, "utf8");
-		JSON.parse(content); // Verify it's valid JSON
+		parseSpecContent(content, specPath); // throws on invalid
 		return true;
 	} catch {
 		return false;
@@ -321,8 +392,18 @@ export async function hasLocalSpec(specPath: string): Promise<boolean> {
 }
 
 /**
- * Loads and parses the local OpenAPI spec.
- * Throws SpecNotFoundError if not found.
+ * Loads and parses the local OpenAPI spec. Accepts both JSON and YAML
+ * (auto-detected via file extension, with JSON-then-YAML fallback for
+ * unknown extensions).
+ *
+ * Returns a `buffer` that's always JSON-encoded — even when the source
+ * was YAML — so the rest of the pipeline (cache file, generator) can
+ * keep using `JSON.parse` without change. Hashing of this normalized
+ * buffer also gives stable cache keys regardless of YAML whitespace
+ * variations. Issue #23.
+ *
+ * Throws `SpecNotFoundError` if the file doesn't exist, or a generic
+ * `Error` if neither JSON nor YAML can parse the content.
  */
 export async function loadLocalSpec(specPath: string): Promise<{
 	spec: unknown;
@@ -334,17 +415,9 @@ export async function loadLocalSpec(specPath: string): Promise<{
 		throw new SpecNotFoundError(specPath);
 	}
 
-	const buffer = await readFile(specPath);
-	const content = buffer.toString("utf8");
-
-	try {
-		const spec = JSON.parse(content);
-		return { spec, buffer };
-	} catch (error) {
-		throw new Error(
-			`Failed to parse OpenAPI spec: ${error instanceof Error ? error.message : String(error)}`
-		);
-	}
+	const rawBuffer = await readFile(specPath);
+	const { spec, jsonBuffer } = normalizeSpecBuffer(rawBuffer, specPath);
+	return { spec, buffer: jsonBuffer };
 }
 
 /**
