@@ -99,8 +99,6 @@ function generateOperationFunction(operation: OperationMetadata): string {
 		pathParams,
 		hasRequestBody,
 		hasQueryParams,
-		hasJsonBody,
-		hasFormDataBody,
 		responseStatus,
 		summary,
 		description,
@@ -117,14 +115,15 @@ function generateOperationFunction(operation: OperationMetadata): string {
 		params.push(`pathParams: ${contractBase}PathParams`);
 	}
 
-	// Request body for POST/PUT/PATCH — form-data bodies are wrapped in
-	// MapFormDataTypes because api.contracts.ts emits the raw OpenAPI schema
-	// without mapping file-like fields to `File | Blob`.
+	// Request body for POST/PUT/PATCH. The contracts file already emits
+	// `File | Blob` for `format: binary` fields, so the body type from
+	// `${contractBase}Body` is correct as-is. The previous wrapper
+	// `MapFormDataTypes<...>` used a substring heuristic on field names
+	// (matching `*image*` / `*file*` / etc.) that mis-typed legitimate
+	// string fields like `profile` and `filename` as `File | Blob`.
+	// Dropped in favor of the spec-driven binary detection. Issue #22.
 	if (hasRequestBody) {
-		const bodyType = hasFormDataBody && !hasJsonBody
-			? `MapFormDataTypes<${contractBase}Body>`
-			: `${contractBase}Body`;
-		params.push(`data: ${bodyType}`);
+		params.push(`data: ${contractBase}Body`);
 	}
 
 	// Config parameter (always last and optional)
@@ -213,23 +212,24 @@ function parseOperations(spec: unknown, logger: Logger): OperationMetadata[] {
 
 	// Iterate through all paths
 	for (const [pathTemplate, pathItem] of Object.entries(paths)) {
-		// Walk every HTTP method on this path. Methods that aren't yet
-		// supported by the runtime client (OPTIONS/HEAD/TRACE) are still
-		// inspected so we can warn the user, but the operations file only
-		// emits entries for `GENERATABLE_HTTP_METHODS`. Issue #31.
+		// Walk every HTTP method on this path. As of #31 the runtime
+		// client emits typed wrappers for all 8 OpenAPI methods, so the
+		// `isGeneratableMethod` check is now a defensive anchor — kept
+		// for future-proofing if a non-OpenAPI method (e.g. CONNECT)
+		// ever appears in a spec.
 		for (const method of HTTP_METHODS) {
 			const operation = pathItem[method] as Record<string, unknown> | undefined;
 
 			if (!operation) continue;
 
-			// Skip operations whose method isn't generatable today, with a
-			// clear warning so users know the operation was deliberately
-			// dropped (vs. an undocumented bug).
-			if (!isGeneratableMethod(method)) {
+			// Defensive: skip unrecognized methods with a clear warning.
+			// Cast through `string` because TS narrows the for-of type to
+			// `never` after isGeneratableMethod rules out every member.
+			if (!isGeneratableMethod(method as string)) {
 				if (operation.operationId) {
 					logger.warn(
 						{
-							method: method.toUpperCase(),
+							method: (method as string).toUpperCase(),
 							path: pathTemplate,
 							operationId: operation.operationId,
 						},
@@ -517,31 +517,15 @@ ${contractImport}
 /* ~ =================================== ~ */
 
 /**
- * Maps OpenAPI form-data field types to their runtime equivalents.
- * Uses field names to intelligently detect file upload fields vs regular string fields.
- *
- * File field patterns: images, files, attachments, uploads, documents, photos, videos, media
- * Regular string fields: All other string/string[] fields remain unchanged
- */
-type MapFormDataTypes<T> = T extends Record<string, unknown>
-  ? {
-      [K in keyof T]:
-        // Check if field name suggests it's a file upload field
-        K extends \`\${string}image\${string}\` | \`\${string}file\${string}\` | \`\${string}attachment\${string}\` |
-                   \`\${string}upload\${string}\` | \`\${string}document\${string}\` | \`\${string}photo\${string}\` |
-                   \`\${string}video\${string}\` | \`\${string}media\${string}\`
-          ? T[K] extends string[]
-            ? File[]  // File upload fields become File[]
-            : T[K] extends string
-              ? File | Blob  // Single file becomes File or Blob
-              : T[K]
-          : T[K];  // Non-file fields keep their original type
-    }
-  : T;
-
-/**
  * Axios request config with typed query parameters for operations that accept them.
  * The type parameter Q is the operation-specific QueryParams contract from api.contracts.
+ *
+ * Note: an earlier version of this file emitted a MapFormDataTypes
+ * helper that re-typed multipart-body string fields as File or Blob
+ * based on substring matching of field names. That mis-typed
+ * legitimate string fields like "profile" and "filename". Removed in
+ * favor of spec-driven binary detection: the contracts file already
+ * emits File or Blob for format binary fields. Issue #22.
  */
 type RequestConfig<Q> = Omit<AxiosRequestConfig, "params"> & {
   params?: Q
@@ -633,14 +617,68 @@ function toPascalCase(str: string): string {
 }
 
 /**
- * Resolves a $ref string like "#/components/schemas/UserContract" to the schema name.
+ * Recognized component kinds that can be referenced by `$ref`. Used to
+ * pick the appropriate inlining strategy in `schemaToTS`. Issue #32.
  */
-function resolveRefName(ref: string): string | null {
-	const prefix = "#/components/schemas/";
-	if (ref.startsWith(prefix)) {
-		return ref.slice(prefix.length);
+type RefKind = "schemas" | "parameters" | "requestBodies" | "responses";
+
+const REF_PREFIXES: Array<[string, RefKind]> = [
+	["#/components/schemas/", "schemas"],
+	["#/components/parameters/", "parameters"],
+	["#/components/requestBodies/", "requestBodies"],
+	["#/components/responses/", "responses"],
+];
+
+/**
+ * Resolves a `$ref` string and returns the kind + name, or `null` for
+ * refs we don't know how to inline. Recognizes the four standard
+ * `components` subtrees. Issue #32.
+ */
+function parseComponentRef(
+	ref: string,
+): { kind: RefKind; name: string } | null {
+	for (const [prefix, kind] of REF_PREFIXES) {
+		if (ref.startsWith(prefix)) {
+			return { kind, name: ref.slice(prefix.length) };
+		}
 	}
 	return null;
+}
+
+/**
+ * Pulls the inner JSON Schema out of a `components.parameters[X]`,
+ * `components.requestBodies[X]`, or `components.responses[X]` object.
+ *
+ * - parameters: `.schema`
+ * - requestBodies: `.content[json].schema` (preferred), else
+ *   `.content[multipart/form-data].schema`
+ * - responses: `.content[json].schema`
+ *
+ * Returns `null` when the structure doesn't include a schema.
+ * Issue #32.
+ */
+function extractInnerSchema(
+	component: unknown,
+	kind: RefKind,
+): Record<string, unknown> | null {
+	if (!component || typeof component !== "object") return null;
+	const obj = component as Record<string, unknown>;
+
+	if (kind === "parameters") {
+		return (obj.schema as Record<string, unknown> | undefined) ?? null;
+	}
+
+	// requestBodies and responses both nest the schema under `.content`.
+	const content = obj.content as Record<string, unknown> | undefined;
+	if (!content) return null;
+	const picked = pickJsonContent(content);
+	if (picked) {
+		return (picked.entry.schema as Record<string, unknown> | undefined) ?? null;
+	}
+	const formData = content["multipart/form-data"] as
+		| Record<string, unknown>
+		| undefined;
+	return (formData?.schema as Record<string, unknown> | undefined) ?? null;
 }
 
 /**
@@ -695,21 +733,45 @@ function schemaToTS(
 	indent: string,
 	allSchemas: Record<string, unknown>,
 	visited: Set<string> = new Set(),
+	allComponents?: Record<string, unknown>,
 ): string {
 	if (!schema || typeof schema !== "object") return "unknown";
 
-	// $ref → recursively inline the referenced schema. On cycles, emit
-	// the sanitized name (the contracts file has a top-level interface
-	// for it) instead of collapsing to `unknown`. Issue #26.
+	// $ref → recursively inline the referenced schema. Recognizes refs
+	// to `components.schemas`, `components.parameters`,
+	// `components.requestBodies`, and `components.responses`. The
+	// non-schema kinds wrap their actual schema under a known field
+	// (`.schema` for parameters, `.content[json].schema` for bodies/
+	// responses), so we extract that and recurse. Issues #26 and #32.
 	if (schema.$ref && typeof schema.$ref === "string") {
-		const refName = resolveRefName(schema.$ref);
-		if (!refName) return "unknown";
-		if (visited.has(refName)) return sanitizeIdentifier(refName);
-		const refSchema = allSchemas[refName] as Record<string, unknown> | undefined;
-		if (!refSchema) return "unknown";
-		const newVisited = new Set(visited);
-		newVisited.add(refName);
-		return schemaToTS(refSchema, indent, allSchemas, newVisited);
+		const parsed = parseComponentRef(schema.$ref);
+		if (!parsed) return "unknown";
+
+		// `components.schemas` — the canonical case. Cycle handling
+		// emits the sanitized name (the contracts file exports it) so
+		// recursive types stay typed instead of collapsing to unknown.
+		if (parsed.kind === "schemas") {
+			if (visited.has(parsed.name)) return sanitizeIdentifier(parsed.name);
+			const refSchema = allSchemas[parsed.name] as Record<string, unknown> | undefined;
+			if (!refSchema) return "unknown";
+			const newVisited = new Set(visited);
+			newVisited.add(parsed.name);
+			return schemaToTS(refSchema, indent, allSchemas, newVisited, allComponents);
+		}
+
+		// Other component kinds need the full components object to look
+		// up. If we weren't passed one (legacy callers), fall back to
+		// `unknown`.
+		if (!allComponents) return "unknown";
+
+		const inner = extractInnerSchema(
+			(allComponents[parsed.kind] as Record<string, unknown> | undefined)?.[
+				parsed.name
+			],
+			parsed.kind,
+		);
+		if (!inner) return "unknown";
+		return schemaToTS(inner, indent, allSchemas, visited, allComponents);
 	}
 
 	// allOf → intersection
@@ -868,6 +930,12 @@ function resolveOperationSchema(
 function generateContractsFileContent(metadata: ContractMetadata): string {
 	const lines: string[] = [];
 	const allSchemas = metadata.schemas as Record<string, unknown>;
+	// Pass the full `components` block to schemaToTS so it can resolve
+	// non-`schemas` $refs (parameters / requestBodies / responses).
+	// Issue #32.
+	const allComponents =
+		(metadata.spec.components as Record<string, unknown> | undefined) ??
+		undefined;
 
 	lines.push(`/**
  * Concrete type contracts extracted from OpenAPI spec.
@@ -904,7 +972,7 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 					lines.push(`export interface ${typeName} {`);
 					for (const [propKey, propSchema] of Object.entries(properties)) {
 						const optional = required.has(propKey) ? "" : "?";
-						const propType = schemaToTS(propSchema, "\t", allSchemas);
+						const propType = schemaToTS(propSchema, "\t", allSchemas, undefined, allComponents);
 						if (propSchema.description) {
 							lines.push(`\t/** ${escapeJsdoc(propSchema.description as string)} */`);
 						}
@@ -915,7 +983,7 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 					lines.push(`export type ${typeName} = Record<string, unknown>;`);
 				}
 			} else {
-				const tsType = schemaToTS(schemaObj, "", allSchemas);
+				const tsType = schemaToTS(schemaObj, "", allSchemas, undefined, allComponents);
 				lines.push(`export type ${typeName} = ${tsType};`);
 			}
 			lines.push(``);
@@ -942,7 +1010,7 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 				const schema = resolveOperationSchema(metadata.spec, op.operationId, "response", resp.status);
 				lines.push(`/** Response: ${op.method.toUpperCase()} ${escapeJsdoc(op.path)} (${resp.status}${desc}) */`);
 				if (schema) {
-					lines.push(`export type ${statusTypeName} = ${schemaToTS(schema, "", allSchemas)};`);
+					lines.push(`export type ${statusTypeName} = ${schemaToTS(schema, "", allSchemas, undefined, allComponents)};`);
 				} else {
 					lines.push(`export type ${statusTypeName} = unknown;`);
 				}
@@ -974,7 +1042,7 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 			const schema = resolveOperationSchema(metadata.spec, op.operationId, "requestBody", undefined, contentType);
 			lines.push(`/** Request body: ${op.method.toUpperCase()} ${escapeJsdoc(op.path)} */`);
 			if (schema) {
-				lines.push(`export type ${typeName} = ${schemaToTS(schema, "", allSchemas)};`);
+				lines.push(`export type ${typeName} = ${schemaToTS(schema, "", allSchemas, undefined, allComponents)};`);
 			} else {
 				lines.push(`export type ${typeName} = unknown;`);
 			}
@@ -995,7 +1063,7 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 			const schema = resolveOperationSchema(metadata.spec, op.operationId, "pathParams");
 			lines.push(`/** Path params: ${op.method.toUpperCase()} ${escapeJsdoc(op.path)} */`);
 			if (schema) {
-				lines.push(`export type ${typeName} = ${schemaToTS(schema, "", allSchemas)};`);
+				lines.push(`export type ${typeName} = ${schemaToTS(schema, "", allSchemas, undefined, allComponents)};`);
 			} else {
 				lines.push(`export type ${typeName} = Record<string, string>;`);
 			}
@@ -1016,7 +1084,7 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 			const schema = resolveOperationSchema(metadata.spec, op.operationId, "queryParams");
 			lines.push(`/** Query params: ${op.method.toUpperCase()} ${escapeJsdoc(op.path)} */`);
 			if (schema) {
-				lines.push(`export type ${typeName} = ${schemaToTS(schema, "", allSchemas)};`);
+				lines.push(`export type ${typeName} = ${schemaToTS(schema, "", allSchemas, undefined, allComponents)};`);
 			} else {
 				lines.push(`export type ${typeName} = Record<string, unknown>;`);
 			}
@@ -1280,28 +1348,13 @@ type QueryParams<P extends Paths, M extends HttpMethod> = Operation<P, M> extend
 /* -- Request Body Extraction -- */
 /* ~ =================================== ~ */
 
-/** Maps OpenAPI form-data field types to their runtime equivalents. */
-type MapFormDataTypes<T> = T extends Record<string, unknown>
-	? {
-			[K in keyof T]: K extends
-				| \`\${string}image\${string}\`
-				| \`\${string}file\${string}\`
-				| \`\${string}attachment\${string}\`
-				| \`\${string}upload\${string}\`
-				| \`\${string}document\${string}\`
-				| \`\${string}photo\${string}\`
-				| \`\${string}video\${string}\`
-				| \`\${string}media\${string}\`
-				? T[K] extends string[]
-					? File[]
-					: T[K] extends string
-						? File | Blob
-						: T[K]
-				: T[K];
-		}
-	: T;
-
-/** Infers the request body type for a given path/method pair from OpenAPI. */
+/**
+ * Infers the request body type for a given path/method pair from OpenAPI.
+ *
+ * The contracts file already emits File or Blob for format binary
+ * fields, so multipart bodies inherit accurate types directly from
+ * the spec — no name-based heuristic needed. Issue #22.
+ */
 type RequestBody<P extends Paths, M extends HttpMethod> = Operation<P, M> extends {
 	requestBody: { content: { "application/json": infer T } };
 }
@@ -1313,9 +1366,9 @@ type RequestBody<P extends Paths, M extends HttpMethod> = Operation<P, M> extend
 			? Record<string, unknown>
 			: T
 		: Operation<P, M> extends { requestBody: { content: { "multipart/form-data": infer T } } }
-			? MapFormDataTypes<T>
+			? T
 			: Operation<P, M> extends { requestBody?: { content: { "multipart/form-data": infer T } } }
-				? MapFormDataTypes<T>
+				? T
 				: never;
 
 /* ~ =================================== ~ */
@@ -1982,28 +2035,13 @@ type TypedAxiosConfig<P extends Paths, M extends HttpMethod> = Omit<
 	params?: QueryParams<P, M>;
 };
 
-/** Maps OpenAPI form-data field types to their runtime equivalents. */
-type MapFormDataTypes<T> = T extends Record<string, unknown>
-	? {
-			[K in keyof T]: K extends
-				| \`\${string}image\${string}\`
-				| \`\${string}file\${string}\`
-				| \`\${string}attachment\${string}\`
-				| \`\${string}upload\${string}\`
-				| \`\${string}document\${string}\`
-				| \`\${string}photo\${string}\`
-				| \`\${string}video\${string}\`
-				| \`\${string}media\${string}\`
-				? T[K] extends string[]
-					? File[]
-					: T[K] extends string
-						? File | Blob
-						: T[K]
-				: T[K];
-		}
-	: T;
-
-/** Infers the request body type for a given path/method pair. */
+/**
+ * Infers the request body type for a given path/method pair.
+ *
+ * Multipart bodies inherit types directly from the contracts file,
+ * which already emits File or Blob for format binary fields. The
+ * earlier MapFormDataTypes substring heuristic is gone — issue #22.
+ */
 type RequestBody<P extends Paths, M extends HttpMethod> = Operation<
 	P,
 	M
@@ -2022,11 +2060,11 @@ type RequestBody<P extends Paths, M extends HttpMethod> = Operation<
 		: Operation<P, M> extends {
 					requestBody: { content: { "multipart/form-data": infer T } };
 				}
-			? MapFormDataTypes<T>
+			? T
 			: Operation<P, M> extends {
 						requestBody?: { content: { "multipart/form-data": infer T } };
 					}
-				? MapFormDataTypes<T>
+				? T
 				: never;
 
 /** Infers the JSON response body type for a given status code. */
@@ -2078,11 +2116,16 @@ function interpolatePath<P extends Paths>(
 
 /**
  * Checks if the request should use multipart/form-data.
+ *
+ * Only triggers when the user explicitly passes a FormData instance.
+ * The earlier path-regex heuristic misclassified any path matching
+ * "/upload$", "/upload-images$", or "/files/upload$" as multipart
+ * regardless of the spec. Multipart endpoints now require the user to
+ * construct FormData themselves — the contracts file's File or Blob
+ * types guide that construction. Issue #22.
  */
-function shouldUseFormData(path: string, data: unknown): boolean {
-	if (data instanceof FormData) return true;
-	const formDataPatterns = [/\\/upload-images$/, /\\/upload$/, /\\/files\\/upload$/];
-	return formDataPatterns.some((pattern) => pattern.test(path));
+function shouldUseFormData(_path: string, data: unknown): boolean {
+	return data instanceof FormData;
 }
 
 /**
@@ -2268,6 +2311,93 @@ const api = {
 				data,
 				finalConfig
 			)
+		);
+	},
+
+	/**
+	 * Sends a HEAD request — returns response headers only (no body).
+	 * Returns Result<T> - never throws.
+	 */
+	head<P extends Paths>(
+		url: P,
+		...args: PathParams<P> extends never
+			? [config?: AxiosRequestConfig]
+			: [pathParams: PathParams<P>, config?: AxiosRequestConfig]
+	): Promise<Result<unknown>> {
+		const hasPathParams = String(url).includes("{");
+		const [pathParamsOrConfig, config] = args;
+
+		const pathParams = hasPathParams
+			? (pathParamsOrConfig as PathParams<P>)
+			: undefined;
+		const finalConfig = hasPathParams
+			? (config as AxiosRequestConfig | undefined)
+			: (pathParamsOrConfig as AxiosRequestConfig | undefined);
+
+		return safeRequest(
+			axiosInstance.head<unknown>(
+				interpolatePath(url, pathParams),
+				finalConfig
+			)
+		);
+	},
+
+	/**
+	 * Sends an OPTIONS request — used for CORS preflight diagnostics.
+	 * Returns Result<T> - never throws.
+	 */
+	options<P extends Paths>(
+		url: P,
+		...args: PathParams<P> extends never
+			? [config?: AxiosRequestConfig]
+			: [pathParams: PathParams<P>, config?: AxiosRequestConfig]
+	): Promise<Result<unknown>> {
+		const hasPathParams = String(url).includes("{");
+		const [pathParamsOrConfig, config] = args;
+
+		const pathParams = hasPathParams
+			? (pathParamsOrConfig as PathParams<P>)
+			: undefined;
+		const finalConfig = hasPathParams
+			? (config as AxiosRequestConfig | undefined)
+			: (pathParamsOrConfig as AxiosRequestConfig | undefined);
+
+		return safeRequest(
+			axiosInstance.options<unknown>(
+				interpolatePath(url, pathParams),
+				finalConfig
+			)
+		);
+	},
+
+	/**
+	 * Sends a TRACE request — diagnostic loopback. Rarely used in
+	 * production; routed through axios.request() since the SDK has no
+	 * .trace() shortcut.
+	 * Returns Result<T> - never throws.
+	 */
+	trace<P extends Paths>(
+		url: P,
+		...args: PathParams<P> extends never
+			? [config?: AxiosRequestConfig]
+			: [pathParams: PathParams<P>, config?: AxiosRequestConfig]
+	): Promise<Result<unknown>> {
+		const hasPathParams = String(url).includes("{");
+		const [pathParamsOrConfig, config] = args;
+
+		const pathParams = hasPathParams
+			? (pathParamsOrConfig as PathParams<P>)
+			: undefined;
+		const finalConfig = hasPathParams
+			? (config as AxiosRequestConfig | undefined)
+			: (pathParamsOrConfig as AxiosRequestConfig | undefined);
+
+		return safeRequest(
+			axiosInstance.request<unknown>({
+				...finalConfig,
+				method: "TRACE",
+				url: interpolatePath(url, pathParams),
+			})
 		);
 	},
 

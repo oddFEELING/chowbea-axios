@@ -63,9 +63,14 @@ export interface StatusResult {
 
 /**
  * Formats a date as a relative time string (e.g., "5s ago", "2h ago").
+ *
+ * Clamps to 0 when the input is in the future (clock skew between the
+ * filesystem and `Date.now`) — `formatTimeAgo` of a clock-skewed
+ * mtime previously rendered as "-3s ago", which surfaced as a confusing
+ * negative number in the status display. Issue #46.
  */
 export function formatTimeAgo(date: Date): string {
-	const seconds = Math.floor((Date.now() - date.getTime()) / 1000);
+	const seconds = Math.max(0, Math.floor((Date.now() - date.getTime()) / 1000));
 
 	if (seconds < 60) return `${seconds}s ago`;
 	if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;

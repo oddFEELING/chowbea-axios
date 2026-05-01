@@ -162,31 +162,58 @@ export class ValidationError extends ChowbeaAxiosError {
 }
 
 /**
- * Formats an error for display, including recovery hints.
+ * Formats an error for display, including recovery hints and any
+ * `cause` chain (ES2022). Issue #46 (formatError + cause).
  */
 export function formatError(error: unknown): string {
+	const lines: string[] = [];
+
 	if (error instanceof ChowbeaAxiosError) {
-		return [
-			`Error [${error.code}]: ${error.message}`,
-			"",
-			`Recovery: ${error.recoveryHint}`,
-		].join("\n");
+		lines.push(`Error [${error.code}]: ${error.message}`);
+		lines.push("");
+		lines.push(`Recovery: ${error.recoveryHint}`);
+	} else if (error instanceof Error) {
+		lines.push(`Error: ${error.message}`);
+	} else {
+		lines.push(`Unknown error: ${String(error)}`);
 	}
 
-	if (error instanceof Error) {
-		return `Error: ${error.message}`;
+	// Walk the `cause` chain. Many libraries thread root causes through
+	// `Error.cause` (e.g. fetch/undici throws with the underlying socket
+	// error as cause). Surfacing it makes debugging much easier.
+	let cause: unknown = (error as { cause?: unknown } | null)?.cause;
+	while (cause != null) {
+		if (cause instanceof Error) {
+			lines.push(`Caused by: ${cause.message}`);
+			cause = (cause as { cause?: unknown }).cause;
+		} else {
+			lines.push(`Caused by: ${String(cause)}`);
+			break;
+		}
 	}
 
-	return `Unknown error: ${String(error)}`;
+	return lines.join("\n");
 }
 
 /**
  * Checks if an error is recoverable (can retry or use fallback).
+ *
+ * 4xx responses (except 408 and 429) are NOT retry-recoverable —
+ * authorization, validation, and missing-resource errors don't change
+ * by retrying. 5xx and connection errors ARE recoverable. Issue #46
+ * (isRecoverable refinement).
  */
 export function isRecoverable(error: unknown): boolean {
 	if (error instanceof NetworkError) {
-		// Network errors are generally recoverable via retry or cache fallback
-		return true;
+		const status = error.statusCode;
+		// No status → connection-level error; retry is the right move.
+		if (status == null) return true;
+		if (status >= 500) return true;
+		// 4xx is mostly non-retriable; 408 (Request Timeout) and 429
+		// (Too Many Requests) are exceptions where retry-with-backoff
+		// is appropriate.
+		if (status === 408 || status === 429) return true;
+		return false;
 	}
 
 	if (error instanceof SpecNotFoundError) {

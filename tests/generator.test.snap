@@ -59,28 +59,13 @@ type TypedAxiosConfig<P extends Paths, M extends HttpMethod> = Omit<
 	params?: QueryParams<P, M>;
 };
 
-/** Maps OpenAPI form-data field types to their runtime equivalents. */
-type MapFormDataTypes<T> = T extends Record<string, unknown>
-	? {
-			[K in keyof T]: K extends
-				| \`\${string}image\${string}\`
-				| \`\${string}file\${string}\`
-				| \`\${string}attachment\${string}\`
-				| \`\${string}upload\${string}\`
-				| \`\${string}document\${string}\`
-				| \`\${string}photo\${string}\`
-				| \`\${string}video\${string}\`
-				| \`\${string}media\${string}\`
-				? T[K] extends string[]
-					? File[]
-					: T[K] extends string
-						? File | Blob
-						: T[K]
-				: T[K];
-		}
-	: T;
-
-/** Infers the request body type for a given path/method pair. */
+/**
+ * Infers the request body type for a given path/method pair.
+ *
+ * Multipart bodies inherit types directly from the contracts file,
+ * which already emits File or Blob for format binary fields. The
+ * earlier MapFormDataTypes substring heuristic is gone — issue #22.
+ */
 type RequestBody<P extends Paths, M extends HttpMethod> = Operation<
 	P,
 	M
@@ -99,11 +84,11 @@ type RequestBody<P extends Paths, M extends HttpMethod> = Operation<
 		: Operation<P, M> extends {
 					requestBody: { content: { "multipart/form-data": infer T } };
 				}
-			? MapFormDataTypes<T>
+			? T
 			: Operation<P, M> extends {
 						requestBody?: { content: { "multipart/form-data": infer T } };
 					}
-				? MapFormDataTypes<T>
+				? T
 				: never;
 
 /** Infers the JSON response body type for a given status code. */
@@ -155,11 +140,16 @@ function interpolatePath<P extends Paths>(
 
 /**
  * Checks if the request should use multipart/form-data.
+ *
+ * Only triggers when the user explicitly passes a FormData instance.
+ * The earlier path-regex heuristic misclassified any path matching
+ * "/upload$", "/upload-images$", or "/files/upload$" as multipart
+ * regardless of the spec. Multipart endpoints now require the user to
+ * construct FormData themselves — the contracts file's File or Blob
+ * types guide that construction. Issue #22.
  */
-function shouldUseFormData(path: string, data: unknown): boolean {
-	if (data instanceof FormData) return true;
-	const formDataPatterns = [/\\/upload-images$/, /\\/upload$/, /\\/files\\/upload$/];
-	return formDataPatterns.some((pattern) => pattern.test(path));
+function shouldUseFormData(_path: string, data: unknown): boolean {
+	return data instanceof FormData;
 }
 
 /**
@@ -345,6 +335,93 @@ const api = {
 				data,
 				finalConfig
 			)
+		);
+	},
+
+	/**
+	 * Sends a HEAD request — returns response headers only (no body).
+	 * Returns Result<T> - never throws.
+	 */
+	head<P extends Paths>(
+		url: P,
+		...args: PathParams<P> extends never
+			? [config?: AxiosRequestConfig]
+			: [pathParams: PathParams<P>, config?: AxiosRequestConfig]
+	): Promise<Result<unknown>> {
+		const hasPathParams = String(url).includes("{");
+		const [pathParamsOrConfig, config] = args;
+
+		const pathParams = hasPathParams
+			? (pathParamsOrConfig as PathParams<P>)
+			: undefined;
+		const finalConfig = hasPathParams
+			? (config as AxiosRequestConfig | undefined)
+			: (pathParamsOrConfig as AxiosRequestConfig | undefined);
+
+		return safeRequest(
+			axiosInstance.head<unknown>(
+				interpolatePath(url, pathParams),
+				finalConfig
+			)
+		);
+	},
+
+	/**
+	 * Sends an OPTIONS request — used for CORS preflight diagnostics.
+	 * Returns Result<T> - never throws.
+	 */
+	options<P extends Paths>(
+		url: P,
+		...args: PathParams<P> extends never
+			? [config?: AxiosRequestConfig]
+			: [pathParams: PathParams<P>, config?: AxiosRequestConfig]
+	): Promise<Result<unknown>> {
+		const hasPathParams = String(url).includes("{");
+		const [pathParamsOrConfig, config] = args;
+
+		const pathParams = hasPathParams
+			? (pathParamsOrConfig as PathParams<P>)
+			: undefined;
+		const finalConfig = hasPathParams
+			? (config as AxiosRequestConfig | undefined)
+			: (pathParamsOrConfig as AxiosRequestConfig | undefined);
+
+		return safeRequest(
+			axiosInstance.options<unknown>(
+				interpolatePath(url, pathParams),
+				finalConfig
+			)
+		);
+	},
+
+	/**
+	 * Sends a TRACE request — diagnostic loopback. Rarely used in
+	 * production; routed through axios.request() since the SDK has no
+	 * .trace() shortcut.
+	 * Returns Result<T> - never throws.
+	 */
+	trace<P extends Paths>(
+		url: P,
+		...args: PathParams<P> extends never
+			? [config?: AxiosRequestConfig]
+			: [pathParams: PathParams<P>, config?: AxiosRequestConfig]
+	): Promise<Result<unknown>> {
+		const hasPathParams = String(url).includes("{");
+		const [pathParamsOrConfig, config] = args;
+
+		const pathParams = hasPathParams
+			? (pathParamsOrConfig as PathParams<P>)
+			: undefined;
+		const finalConfig = hasPathParams
+			? (config as AxiosRequestConfig | undefined)
+			: (pathParamsOrConfig as AxiosRequestConfig | undefined);
+
+		return safeRequest(
+			axiosInstance.request<unknown>({
+				...finalConfig,
+				method: "TRACE",
+				url: interpolatePath(url, pathParams),
+			})
 		);
 	},
 
@@ -694,28 +771,13 @@ type QueryParams<P extends Paths, M extends HttpMethod> = Operation<P, M> extend
 /* -- Request Body Extraction -- */
 /* ~ =================================== ~ */
 
-/** Maps OpenAPI form-data field types to their runtime equivalents. */
-type MapFormDataTypes<T> = T extends Record<string, unknown>
-	? {
-			[K in keyof T]: K extends
-				| \`\${string}image\${string}\`
-				| \`\${string}file\${string}\`
-				| \`\${string}attachment\${string}\`
-				| \`\${string}upload\${string}\`
-				| \`\${string}document\${string}\`
-				| \`\${string}photo\${string}\`
-				| \`\${string}video\${string}\`
-				| \`\${string}media\${string}\`
-				? T[K] extends string[]
-					? File[]
-					: T[K] extends string
-						? File | Blob
-						: T[K]
-				: T[K];
-		}
-	: T;
-
-/** Infers the request body type for a given path/method pair from OpenAPI. */
+/**
+ * Infers the request body type for a given path/method pair from OpenAPI.
+ *
+ * The contracts file already emits File or Blob for format binary
+ * fields, so multipart bodies inherit accurate types directly from
+ * the spec — no name-based heuristic needed. Issue #22.
+ */
 type RequestBody<P extends Paths, M extends HttpMethod> = Operation<P, M> extends {
 	requestBody: { content: { "application/json": infer T } };
 }
@@ -727,9 +789,9 @@ type RequestBody<P extends Paths, M extends HttpMethod> = Operation<P, M> extend
 			? Record<string, unknown>
 			: T
 		: Operation<P, M> extends { requestBody: { content: { "multipart/form-data": infer T } } }
-			? MapFormDataTypes<T>
+			? T
 			: Operation<P, M> extends { requestBody?: { content: { "multipart/form-data": infer T } } }
-				? MapFormDataTypes<T>
+				? T
 				: never;
 
 /* ~ =================================== ~ */
@@ -1073,6 +1135,11 @@ export type Upload_fileBody = {
 export type Get_userPathParams = {
 	id: string;
 };
+
+/** Path params: HEAD /users/{id} */
+export type Head_userPathParams = {
+	id: string;
+};
 "
 `;
 
@@ -1083,7 +1150,7 @@ exports[`generator: end-to-end snapshots > edge-cases — kebab/snake collision,
  * This file is automatically generated by chowbea-axios CLI.
  * DO NOT EDIT MANUALLY - your changes will be overwritten.
  *
- * Total operations: 5
+ * Total operations: 6
  */
 
 /* ~ =================================== ~ */
@@ -1099,6 +1166,7 @@ import type {
   Get_dictionaryResponse,
   Get_userPathParams,
   Get_userResponse,
+  Head_userPathParams,
   List_itemsResponse,
   Upload_fileBody,
 } from "./api.contracts"
@@ -1108,31 +1176,15 @@ import type {
 /* ~ =================================== ~ */
 
 /**
- * Maps OpenAPI form-data field types to their runtime equivalents.
- * Uses field names to intelligently detect file upload fields vs regular string fields.
- *
- * File field patterns: images, files, attachments, uploads, documents, photos, videos, media
- * Regular string fields: All other string/string[] fields remain unchanged
- */
-type MapFormDataTypes<T> = T extends Record<string, unknown>
-  ? {
-      [K in keyof T]:
-        // Check if field name suggests it's a file upload field
-        K extends \`\${string}image\${string}\` | \`\${string}file\${string}\` | \`\${string}attachment\${string}\` |
-                   \`\${string}upload\${string}\` | \`\${string}document\${string}\` | \`\${string}photo\${string}\` |
-                   \`\${string}video\${string}\` | \`\${string}media\${string}\`
-          ? T[K] extends string[]
-            ? File[]  // File upload fields become File[]
-            : T[K] extends string
-              ? File | Blob  // Single file becomes File or Blob
-              : T[K]
-          : T[K];  // Non-file fields keep their original type
-    }
-  : T;
-
-/**
  * Axios request config with typed query parameters for operations that accept them.
  * The type parameter Q is the operation-specific QueryParams contract from api.contracts.
+ *
+ * Note: an earlier version of this file emitted a MapFormDataTypes
+ * helper that re-typed multipart-body string fields as File or Blob
+ * based on substring matching of field names. That mis-typed
+ * legitimate string fields like "profile" and "filename". Removed in
+ * favor of spec-driven binary detection: the contracts file already
+ * emits File or Blob for format binary fields. Issue #22.
  */
 type RequestConfig<Q> = Omit<AxiosRequestConfig, "params"> & {
   params?: Q
@@ -1170,6 +1222,15 @@ export const createOperations = (apiClient: any) => ({
   "get-user": (pathParams: Get_userPathParams, config?: AxiosRequestConfig): Promise<Result<Get_userResponse>> => apiClient.get("/users/{id}", pathParams, config),
 
   /**
+   * HEAD method (currently dropped — issue #31)
+   * 
+   * @operationId head-user
+   * @method HEAD
+   * @path /users/{id}
+   */
+  "head-user": (pathParams: Head_userPathParams, config?: AxiosRequestConfig): Promise<Result<unknown>> => apiClient.head("/users/{id}", pathParams, config),
+
+  /**
    * Wildcard media type (*\\/*) — relies on pickJsonContent fallback
    * 
    * @operationId list-items
@@ -1194,7 +1255,7 @@ export const createOperations = (apiClient: any) => ({
    * @method POST
    * @path /upload
    */
-  "upload-file": (data: MapFormDataTypes<Upload_fileBody>, config?: AxiosRequestConfig): Promise<Result<unknown>> => apiClient.post("/upload", data, config),
+  "upload-file": (data: Upload_fileBody, config?: AxiosRequestConfig): Promise<Result<unknown>> => apiClient.post("/upload", data, config),
 
   /**
    * additionalProperties currently dropped — issue #32
@@ -1351,31 +1412,15 @@ import type {
 /* ~ =================================== ~ */
 
 /**
- * Maps OpenAPI form-data field types to their runtime equivalents.
- * Uses field names to intelligently detect file upload fields vs regular string fields.
- *
- * File field patterns: images, files, attachments, uploads, documents, photos, videos, media
- * Regular string fields: All other string/string[] fields remain unchanged
- */
-type MapFormDataTypes<T> = T extends Record<string, unknown>
-  ? {
-      [K in keyof T]:
-        // Check if field name suggests it's a file upload field
-        K extends \`\${string}image\${string}\` | \`\${string}file\${string}\` | \`\${string}attachment\${string}\` |
-                   \`\${string}upload\${string}\` | \`\${string}document\${string}\` | \`\${string}photo\${string}\` |
-                   \`\${string}video\${string}\` | \`\${string}media\${string}\`
-          ? T[K] extends string[]
-            ? File[]  // File upload fields become File[]
-            : T[K] extends string
-              ? File | Blob  // Single file becomes File or Blob
-              : T[K]
-          : T[K];  // Non-file fields keep their original type
-    }
-  : T;
-
-/**
  * Axios request config with typed query parameters for operations that accept them.
  * The type parameter Q is the operation-specific QueryParams contract from api.contracts.
+ *
+ * Note: an earlier version of this file emitted a MapFormDataTypes
+ * helper that re-typed multipart-body string fields as File or Blob
+ * based on substring matching of field names. That mis-typed
+ * legitimate string fields like "profile" and "filename". Removed in
+ * favor of spec-driven binary detection: the contracts file already
+ * emits File or Blob for format binary fields. Issue #22.
  */
 type RequestConfig<Q> = Omit<AxiosRequestConfig, "params"> & {
   params?: Q

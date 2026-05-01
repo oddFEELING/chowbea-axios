@@ -1,18 +1,9 @@
 /**
  * Shared HTTP method enumerations.
  *
- * Two sets:
- * - `HTTP_METHODS` covers the 8 methods OpenAPI 3 defines on a Path
- *   Item. Used for discovery: status counts, diff, validate, inspect —
- *   so the user sees their full spec, not just the 5 the generator
- *   knows how to emit today.
- * - `GENERATABLE_HTTP_METHODS` are the 5 methods that the generated
- *   runtime client (`api.client.ts`) exposes as typed wrappers
- *   (`apiClient.get`/`post`/`put`/`delete`/`patch`). The operations
- *   file emits calls only for these; OPTIONS/HEAD/TRACE operations are
- *   discovered but skipped at emission time with a warning.
- *
- * Issue #31.
+ * `HTTP_METHODS` covers the 8 methods OpenAPI 3 defines on a Path Item.
+ * `GENERATABLE_HTTP_METHODS` is now identical — the runtime client
+ * emits typed wrappers for all 8. Issue #31 (fully resolved).
  */
 
 export const HTTP_METHODS = [
@@ -28,22 +19,24 @@ export const HTTP_METHODS = [
 
 export type HttpMethod = (typeof HTTP_METHODS)[number];
 
-export const GENERATABLE_HTTP_METHODS = [
-	"get",
-	"post",
-	"put",
-	"delete",
-	"patch",
-] as const;
+/**
+ * Methods the runtime client emits typed wrappers for. As of #31 this
+ * matches HTTP_METHODS exactly (all 8). The constant and helper are
+ * retained as defensive anchors in case a non-OpenAPI-3 method (e.g.
+ * CONNECT) is encountered in a spec — the helper returns `false` for
+ * anything outside this list so callers can skip + warn.
+ */
+export const GENERATABLE_HTTP_METHODS = HTTP_METHODS;
 
 export type GeneratableHttpMethod = (typeof GENERATABLE_HTTP_METHODS)[number];
 
 const GENERATABLE_SET: ReadonlySet<string> = new Set(GENERATABLE_HTTP_METHODS);
 
 /**
- * True when the generator's runtime client has a typed wrapper for the
- * given method. Used to warn (not error) when a spec declares an
- * operation under a method the generator can't emit yet.
+ * True when the runtime client has a typed wrapper for the given
+ * method. Used as a defensive anchor for spec-author typos or non-
+ * OpenAPI-3 methods (e.g. `connect`) — the generator skips with a
+ * warning rather than emitting calls for unrecognized methods.
  */
 export function isGeneratableMethod(method: string): method is GeneratableHttpMethod {
 	return GENERATABLE_SET.has(method);
