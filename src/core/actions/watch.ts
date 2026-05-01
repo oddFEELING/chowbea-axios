@@ -143,6 +143,14 @@ export async function executeWatch(
 	logger.debug({ specSource, intervalMs }, "config");
 
 	let cycleCounter = 0;
+	let consecutiveFailures = 0;
+	// Cap backoff at 5 minutes so a transiently broken endpoint doesn't
+	// stay quiet forever once it recovers.
+	const MAX_BACKOFF_MS = 5 * 60_000;
+	// Stop the loop after this many consecutive failures so a permanently
+	// broken setup (deleted spec file, 401 forever, malformed cached
+	// spec) doesn't spam logs indefinitely. Issue #34.
+	const MAX_CONSECUTIVE_FAILURES = 10;
 	const signal = options.signal;
 
 	// Main watch loop
@@ -150,7 +158,7 @@ export async function executeWatch(
 		cycleCounter++;
 		const cycleId = cycleCounter;
 
-		await runCycle({
+		const failed = await runCycle({
 			cycleId,
 			specSource,
 			outputPaths,
@@ -158,6 +166,34 @@ export async function executeWatch(
 			headers: config.fetch?.headers,
 			callbacks,
 		});
+
+		if (failed) {
+			consecutiveFailures += 1;
+			if (consecutiveFailures >= MAX_CONSECUTIVE_FAILURES) {
+				logger.error(
+					{ failures: consecutiveFailures },
+					`Watch loop exiting after ${MAX_CONSECUTIVE_FAILURES} consecutive failures. Investigate and re-run 'chowbea-axios watch'.`,
+				);
+				callbacks?.onShutdown?.();
+				return;
+			}
+			// Exponential backoff: wait the normal interval × 2^(failures-1),
+			// capped. After a successful cycle we reset to the base interval.
+			const backoff = Math.min(
+				intervalMs * 2 ** (consecutiveFailures - 1),
+				MAX_BACKOFF_MS,
+			);
+			logger.warn(
+				{ failures: consecutiveFailures, backoffMs: backoff },
+				"Backing off after repeated failures",
+			);
+			if (!signal?.aborted) {
+				await abortableDelay(backoff, signal);
+			}
+			continue;
+		}
+
+		consecutiveFailures = 0;
 
 		// Wait before next cycle (respects abort signal)
 		if (!signal?.aborted) {
@@ -174,6 +210,10 @@ export async function executeWatch(
 /**
  * Runs a single watch cycle - load (fetch or read) the spec, check for changes,
  * regenerate if needed.
+ *
+ * Returns `true` when the cycle failed (so the outer loop can apply
+ * exponential backoff and exit after too many consecutive failures —
+ * issue #34). Returns `false` on success.
  */
 async function runCycle(options: {
 	cycleId: number;
@@ -182,7 +222,7 @@ async function runCycle(options: {
 	logger: Logger;
 	headers?: Record<string, string>;
 	callbacks?: WatchCallbacks;
-}): Promise<void> {
+}): Promise<boolean> {
 	const { cycleId, specSource, outputPaths, logger, headers, callbacks } =
 		options;
 	const startTime = Date.now();
@@ -246,7 +286,7 @@ async function runCycle(options: {
 				"no changes",
 			);
 			callbacks?.onCycleComplete?.(cycleId, false, durationMs);
-			return;
+			return false;
 		}
 
 		// Save the new spec
@@ -280,18 +320,21 @@ async function runCycle(options: {
 		);
 
 		callbacks?.onCycleComplete?.(cycleId, true, durationMs);
+		return false;
 	} catch (error) {
 		const cycleError = error instanceof Error ? error : new Error(String(error));
 
-		// Log error but continue watching
+		// Log error and return failed=true so the outer loop can apply
+		// exponential backoff. Issue #34.
 		logger.error(
 			{
 				cycleId,
 				error: cycleError.message,
 			},
-			"Cycle failed, will retry next interval",
+			"Cycle failed, backing off before retry",
 		);
 
 		callbacks?.onCycleError?.(cycleId, cycleError);
+		return true;
 	}
 }

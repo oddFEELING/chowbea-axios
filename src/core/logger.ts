@@ -43,10 +43,19 @@ function shortenPath(value: string): string {
 
 /**
  * Formats a context value, shortening paths and coloring.
+ *
+ * Path-shortening triggers on any absolute path or `./`/`../`-relative
+ * path. Uses `path.isAbsolute` so Windows paths (`C:\…`) are recognized
+ * — the previous `value.startsWith("/")` test only matched POSIX-style
+ * paths and silently bypassed shortening on Windows. Issue #44.
  */
 function formatValue(value: unknown): string {
 	if (typeof value === "string") {
-		if (value.startsWith("/") && value.includes("/")) {
+		const isPathLike =
+			path.isAbsolute(value) ||
+			value.startsWith("./") ||
+			value.startsWith("../");
+		if (isPathLike) {
 			return pc.cyan(shortenPath(value));
 		}
 		return pc.cyan(value);

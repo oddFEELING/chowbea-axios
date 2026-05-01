@@ -12,7 +12,10 @@ function hasBun(): boolean {
 
 /**
  * Re-launch the current script under Bun for TUI support.
- * Returns true if Bun launched successfully, false if not.
+ *
+ * Either calls `process.exit` with the child's status (success path) or
+ * returns `false` after logging the spawn failure — the caller can then
+ * fall back to headless mode rather than silently exiting. Issue #45.
  */
 function relaunchWithBun(argv: string[]): boolean {
 	// Resolve the .ts entry point next to the .js one
@@ -29,7 +32,13 @@ function relaunchWithBun(argv: string[]): boolean {
 		env: process.env,
 	});
 
-	if (result.error) return false;
+	if (result.error) {
+		console.error(
+			`Failed to relaunch under Bun: ${result.error.message}\n` +
+				"Falling back to headless mode.",
+		);
+		return false;
+	}
 	process.exit(result.status ?? 0);
 }
 
@@ -56,17 +65,23 @@ export async function route(argv: string[]): Promise<void> {
 			return;
 		}
 
-		// Running under Node — try to re-launch with Bun
+		// Running under Node — try to re-launch with Bun. On success the
+		// child process exits and never returns; on failure we fall through
+		// to headless help with a clear message (#45).
 		if (hasBun()) {
-			relaunchWithBun(argv);
-			return; // unreachable — relaunchWithBun calls process.exit
+			const launched = relaunchWithBun(argv);
+			if (launched) return; // unreachable — process.exit on success
+			// fall through to headless on failure
+		} else {
+			// No Bun available — print the requires-Bun notice once and
+			// return. Falling through to `runHeadless(undefined, args)` would
+			// produce confusing dual output (#45).
+			console.log(
+				"TUI dashboard requires Bun. Install Bun (https://bun.sh) or use headless mode:\n" +
+					"  chowbea-axios <command>\n",
+			);
+			return;
 		}
-
-		// No Bun available
-		console.log(
-			"TUI dashboard requires Bun. Install Bun (https://bun.sh) or use headless mode:\n" +
-			"  chowbea-axios <command>\n",
-		);
 	}
 
 	// Headless CLI mode

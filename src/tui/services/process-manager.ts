@@ -84,15 +84,33 @@ class ProcessManager {
 		this.processes = [...this.processes, newProc];
 		this.notify();
 
+		// Append output lines in-place on the existing array, dropping the
+		// oldest entries when we exceed `MAX_OUTPUT_LINES`. The previous
+		// `[...output, ...lines].slice(-MAX)` rebuilt the entire array on
+		// every chunk — O(n²) over time for long-running watch tasks. Now
+		// we splice from the front only when the cap is exceeded, which is
+		// O(k) per chunk (k = count of lines added), and use a fresh
+		// process-info object for React reference identity. Issue #35.
+		//
+		// Also: `chunk.toString().split(/\r?\n/)` produces a trailing empty
+		// element for the final newline. We strip ONLY that trailing
+		// element rather than `.filter(Boolean)`-ing the whole array, so
+		// intentional blank lines mid-output are preserved (a process
+		// printing banner separators stays readable). Issue #35.
 		const appendOutput = (chunk: Buffer, stream: "stdout" | "stderr") => {
-			const lines = chunk.toString().split(/\r?\n/).filter(Boolean);
+			const parts = chunk.toString().split(/\r?\n/);
+			if (parts.length > 0 && parts[parts.length - 1] === "") {
+				parts.pop();
+			}
+			if (parts.length === 0) return;
 			this.processes = this.processes.map((p) => {
 				if (p.id !== id) return p;
-				const merged = [
-					...p.output,
-					...lines.map((text) => ({ text, stream })),
-				].slice(-MAX_OUTPUT_LINES);
-				return { ...p, output: merged };
+				const next = p.output.slice();
+				for (const text of parts) next.push({ text, stream });
+				if (next.length > MAX_OUTPUT_LINES) {
+					next.splice(0, next.length - MAX_OUTPUT_LINES);
+				}
+				return { ...p, output: next };
 			});
 			this.notify();
 		};
@@ -104,12 +122,14 @@ class ProcessManager {
 			this.children.delete(id);
 			this.processes = this.processes.map((p) => {
 				if (p.id !== id) return p;
+				const next = p.output.slice();
+				next.push({ text: `Failed to start: ${err.message}`, stream: "stderr" });
+				if (next.length > MAX_OUTPUT_LINES) {
+					next.splice(0, next.length - MAX_OUTPUT_LINES);
+				}
 				return {
 					...p,
-					output: [
-						...p.output,
-						{ text: `Failed to start: ${err.message}`, stream: "stderr" as const },
-					].slice(-MAX_OUTPUT_LINES),
+					output: next,
 					status: "crashed",
 					exitCode: null,
 				};
