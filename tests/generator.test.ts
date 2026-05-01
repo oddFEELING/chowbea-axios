@@ -111,24 +111,88 @@ describe("generator: known-bug regression markers", () => {
 		}
 	});
 
-	it.fails("#14: descriptions containing `*/` must not break JSDoc comments", async () => {
+	it("#14 (FIXED): descriptions containing `*/` do not break JSDoc comments", async () => {
 		const spec = await loadFixture("edge-cases.json");
 		const { contracts, operations, cleanup } = await runGenerator(spec);
 		try {
-			// After fix, raw `*/` should not appear inside the body of any
-			// JSDoc block. Today the contracts file leaks `*/ injection in
-			// description` into code position.
-			const body = contracts + "\n" + operations;
-			// Look for `*/` followed by anything but whitespace+end-of-comment-block
-			const lines = body.split("\n");
-			for (const line of lines) {
-				// Allow legitimate comment terminators (a line that's just */ optionally indented)
-				if (/^\s*\*\/\s*$/.test(line)) continue;
-				expect(line).not.toMatch(/\*\//);
-			}
+			// The fixture's User schema description is:
+			//   "A user. Description containing */ injection attempt — issue #14."
+			// Pre-fix, the unescaped `*/` closed the JSDoc block early and the
+			// trailing text leaked into code position. Post-fix, the entire
+			// description is preserved with `*/` rewritten to `*\/`, and no
+			// part of the description appears outside a comment.
+			//
+			// Specific assertions:
+			// - The escaped form `*\/` appears (proving the helper ran).
+			expect(contracts).toMatch(/\*\\\//);
+			// - The danger string after the `*/` (`injection attempt`) never
+			//   appears as bare code — only as part of a comment line that
+			//   begins with whitespace and `*` (the `*` of the JSDoc body).
+			const checkLeak = (body: string) => {
+				const leakingLines = body
+					.split("\n")
+					.filter((line) => /injection attempt/.test(line))
+					.filter((line) => !/^\s*\*\s/.test(line));
+				expect(leakingLines).toEqual([]);
+			};
+			checkLeak(contracts);
+			checkLeak(operations);
 		} finally {
 			await cleanup();
 		}
+	});
+
+	it("#17 (FIXED): generateInstanceFileContent rejects malicious env_accessor", async () => {
+		const { generateInstanceFileContent } = await import(
+			"../src/core/generator.js"
+		);
+		const { DEFAULT_INSTANCE_CONFIG } = await import(
+			"../src/core/config.js"
+		);
+		expect(() =>
+			generateInstanceFileContent({
+				...DEFAULT_INSTANCE_CONFIG,
+				env_accessor: 'process.env); throw new Error("pwn"); //',
+			}),
+		).toThrow(/Invalid env_accessor/);
+	});
+
+	it("#17 (FIXED): generateInstanceFileContent rejects malicious base_url_env", async () => {
+		const { generateInstanceFileContent } = await import(
+			"../src/core/generator.js"
+		);
+		const { DEFAULT_INSTANCE_CONFIG } = await import(
+			"../src/core/config.js"
+		);
+		expect(() =>
+			generateInstanceFileContent({
+				...DEFAULT_INSTANCE_CONFIG,
+				base_url_env: 'API_URL; require("fs").writeFileSync("/tmp/pwn", "x"); var x = "',
+			}),
+		).toThrow(/Invalid base_url_env/);
+	});
+
+	it("#17 (FIXED): generateInstanceFileContent emits tokenKey via JSON.stringify so quotes/backslashes can't escape the literal", async () => {
+		const { generateInstanceFileContent } = await import(
+			"../src/core/generator.js"
+		);
+		const { DEFAULT_INSTANCE_CONFIG } = await import(
+			"../src/core/config.js"
+		);
+		const out = generateInstanceFileContent({
+			...DEFAULT_INSTANCE_CONFIG,
+			auth_mode: "bearer-localstorage",
+			token_key: 'foo"; throw 0; var x = "bar',
+		});
+		// The dangerous payload must appear escaped inside a single string
+		// literal. JSON.stringify escapes the embedded `"` to `\"`, so the
+		// literal stays intact end-to-end.
+		expect(out).toMatch(/export const tokenKey = "foo\\"; throw 0; var x = \\"bar";/);
+		// And there should be exactly one `tokenKey =` in the file (not two —
+		// which would happen if the payload broke out of the literal and
+		// declared its own).
+		const tokenKeyMatches = out.match(/tokenKey\s*=/g) ?? [];
+		expect(tokenKeyMatches).toHaveLength(1);
 	});
 
 	it("#15 (FIXED): enum string values containing `\"` or `\\` are properly escaped", async () => {

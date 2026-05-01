@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "node:path";
-import { commandExists } from "./core/pm.js";
+import { commandExists, resolveCommand } from "./core/pm.js";
 
 /**
  * Check if Bun is available on the system.
@@ -20,10 +20,13 @@ function relaunchWithBun(argv: string[]): boolean {
 	const binDir = resolve(dirname(thisFile), "..", "bin");
 	const tsEntry = resolve(binDir, "chowbea-axios.ts");
 
-	const result = spawnSync("bun", [tsEntry, ...argv.slice(2)], {
+	// No `shell: true` — user argv flows through here, and shell metacharacters
+	// in user-supplied args (e.g. paths from automation) would otherwise be
+	// interpreted by the shell. resolveCommand handles Windows .cmd shims.
+	// Issue #16.
+	const result = spawnSync(resolveCommand("bun"), [tsEntry, ...argv.slice(2)], {
 		stdio: "inherit",
 		env: process.env,
-		shell: true,
 	});
 
 	if (result.error) return false;
