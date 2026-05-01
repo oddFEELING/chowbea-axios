@@ -644,9 +644,51 @@ function resolveRefName(ref: string): string | null {
 }
 
 /**
+ * Renders `additionalProperties` as a `Record<string, T>` clause, or
+ * `null` when no additional-properties contract applies. Issue #32.
+ *
+ * - `true` / any truthy non-object  → `Record<string, unknown>`
+ * - schema object (e.g. `{ type: "string" }`) → `Record<string, T>`
+ *   where `T` is recursively rendered.
+ * - `false` / `undefined`           → `null` (closed shape; no clause)
+ */
+function renderAdditionalProperties(
+	additionalProperties: unknown,
+	indent: string,
+	allSchemas: Record<string, unknown>,
+	visited: Set<string>,
+): string | null {
+	if (additionalProperties === undefined || additionalProperties === false) {
+		return null;
+	}
+	if (additionalProperties === true) {
+		return "Record<string, unknown>";
+	}
+	if (typeof additionalProperties === "object" && additionalProperties !== null) {
+		const valueType = schemaToTS(
+			additionalProperties as Record<string, unknown>,
+			indent,
+			allSchemas,
+			visited,
+		);
+		// Wrap unions/intersections so the Record value type parses cleanly.
+		const needsParens = valueType.includes(" | ") || valueType.includes(" & ");
+		return `Record<string, ${needsParens ? `(${valueType})` : valueType}>`;
+	}
+	return null;
+}
+
+/**
  * Converts a JSON Schema to a fully-expanded TypeScript type string.
- * Recursively inlines $ref schemas so every type is visible without indirection.
- * Uses a visited set to detect circular references (falls back to `unknown` for cycles).
+ * Recursively inlines $ref schemas so every type is visible without
+ * indirection.
+ *
+ * For recursive schemas (a `$ref` whose target is already on the
+ * inlining stack), emits the sanitized type name from the contracts
+ * file rather than collapsing to `unknown`. The contracts file emits
+ * a top-level `export interface <Name>` for every entry in
+ * `components.schemas`, so the named reference resolves at TS compile
+ * time. Issue #26.
  */
 function schemaToTS(
 	schema: Record<string, unknown>,
@@ -656,11 +698,13 @@ function schemaToTS(
 ): string {
 	if (!schema || typeof schema !== "object") return "unknown";
 
-	// $ref → recursively inline the referenced schema
+	// $ref → recursively inline the referenced schema. On cycles, emit
+	// the sanitized name (the contracts file has a top-level interface
+	// for it) instead of collapsing to `unknown`. Issue #26.
 	if (schema.$ref && typeof schema.$ref === "string") {
 		const refName = resolveRefName(schema.$ref);
 		if (!refName) return "unknown";
-		if (visited.has(refName)) return "unknown"; // circular ref guard
+		if (visited.has(refName)) return sanitizeIdentifier(refName);
 		const refSchema = allSchemas[refName] as Record<string, unknown> | undefined;
 		if (!refSchema) return "unknown";
 		const newVisited = new Set(visited);
@@ -699,12 +743,29 @@ function schemaToTS(
 		return needsParens ? `(${itemType})[]` : `${itemType}[]`;
 	}
 
-	// object with properties → inline object type
+	// object with properties → inline object type. Honors
+	// `additionalProperties` per OpenAPI / JSON Schema:
+	//   - true (or any non-false truthy)             → Record<string, unknown>
+	//   - schema (e.g. { type: "string" })           → Record<string, T>
+	//   - false / undefined / explicit closed shape  → no record intersection
+	// Combined with named properties, the open-shape becomes an
+	// intersection (`{ ... } & Record<string, T>`). Issue #32.
 	if (schemaType === "object" || schema.properties) {
 		const properties = schema.properties as Record<string, Record<string, unknown>> | undefined;
+		const additionalType = renderAdditionalProperties(
+			schema.additionalProperties,
+			indent,
+			allSchemas,
+			visited,
+		);
+
 		if (!properties || Object.keys(properties).length === 0) {
-			return "Record<string, unknown>";
+			// No named properties — an open object collapses to a Record.
+			// `additionalProperties: false` is meaningless without props,
+			// so default to `Record<string, unknown>` if not specified.
+			return additionalType ?? "Record<string, unknown>";
 		}
+
 		const required = new Set<string>(Array.isArray(schema.required) ? schema.required as string[] : []);
 		const innerIndent = indent + "\t";
 		const props = Object.entries(properties).map(([key, propSchema]) => {
@@ -715,7 +776,8 @@ function schemaToTS(
 				: "";
 			return `${desc}${formatPropertyKey(key)}${optional}: ${propType};`;
 		});
-		return `{\n${innerIndent}${props.join(`\n${innerIndent}`)}\n${indent}}`;
+		const objectType = `{\n${innerIndent}${props.join(`\n${innerIndent}`)}\n${indent}}`;
+		return additionalType ? `${objectType} & ${additionalType}` : objectType;
 	}
 
 	// primitive types

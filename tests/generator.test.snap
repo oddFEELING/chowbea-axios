@@ -995,7 +995,7 @@ export interface User {
 		id: string;
 		name: string;
 		email?: string;
-		friends?: unknown[];
+		friends?: User[];
 	}[];
 }
 
@@ -1016,7 +1016,7 @@ export type Get_userResponse200 = {
 	id: string;
 	name: string;
 	email?: string;
-	friends?: unknown[];
+	friends?: User[];
 };
 
 /** Response: GET /users/{id} (happy path) */
@@ -1043,7 +1043,7 @@ export type Create_itemResponse = Create_itemResponse201;
 /** Response: GET /dictionary (200 - OK) */
 export type Get_dictionaryResponse200 = {
 	id?: string;
-};
+} & Record<string, string>;
 
 /** Response: GET /dictionary (happy path) */
 export type Get_dictionaryResponse = Get_dictionaryResponse200;

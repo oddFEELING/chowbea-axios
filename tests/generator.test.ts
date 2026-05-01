@@ -263,13 +263,15 @@ describe("generator: known-bug regression markers", () => {
 		}
 	});
 
-	it.fails("#26: recursive types should reference themselves, not collapse to unknown[]", async () => {
+	it("#26 (FIXED): recursive types reference themselves instead of collapsing to unknown[]", async () => {
 		const spec = await loadFixture("edge-cases.json");
 		const { contracts, cleanup } = await runGenerator(spec);
 		try {
-			// Today emits `friends?: unknown[]`.
-			// After fix: `friends?: User[]` (or some self-referential alias).
+			// `User.friends` recurses into User; on the cycle we now emit
+			// the sanitized name, which the contracts file already exports
+			// as a top-level interface.
 			expect(contracts).not.toMatch(/friends\?:\s*unknown\[\]/);
+			expect(contracts).toMatch(/friends\?:\s*User\[\]/);
 		} finally {
 			await cleanup();
 		}
@@ -380,14 +382,83 @@ describe("generator: known-bug regression markers", () => {
 		}
 	});
 
-	it.fails("#32: additionalProperties should not be silently dropped", async () => {
+	it("#32 (FIXED): additionalProperties produces a Record<string, T> intersection", async () => {
 		const spec = await loadFixture("edge-cases.json");
 		const { contracts, cleanup } = await runGenerator(spec);
 		try {
-			// `/dictionary` GET response has additionalProperties: { type: string }.
-			// After fix: emitted type should include `Record<string, string>` or
-			// an index signature `[key: string]: string`.
-			expect(contracts).toMatch(/Record<string,\s*string>|\[key:\s*string\]:\s*string/);
+			// `/dictionary` GET response has additionalProperties: { type: string }
+			// alongside a named `id` property. The emitted type combines
+			// `{ id?: string }` with `Record<string, string>`.
+			expect(contracts).toMatch(/Record<string,\s*string>/);
+		} finally {
+			await cleanup();
+		}
+	});
+
+	it("#32 (FIXED): additionalProperties: true emits Record<string, unknown>", async () => {
+		const spec = {
+			openapi: "3.0.3",
+			info: { title: "X", version: "1.0.0" },
+			paths: {
+				"/x": {
+					get: {
+						operationId: "get-x",
+						responses: {
+							"200": {
+								description: "OK",
+								content: {
+									"application/json": {
+										schema: {
+											type: "object",
+											additionalProperties: true,
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		};
+		const { contracts, cleanup } = await runGenerator(spec);
+		try {
+			expect(contracts).toMatch(/Record<string,\s*unknown>/);
+		} finally {
+			await cleanup();
+		}
+	});
+
+	it("#32 (FIXED): additionalProperties: false leaves a closed object", async () => {
+		const spec = {
+			openapi: "3.0.3",
+			info: { title: "X", version: "1.0.0" },
+			paths: {
+				"/x": {
+					get: {
+						operationId: "get-x",
+						responses: {
+							"200": {
+								description: "OK",
+								content: {
+									"application/json": {
+										schema: {
+											type: "object",
+											properties: { id: { type: "string" } },
+											additionalProperties: false,
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		};
+		const { contracts, cleanup } = await runGenerator(spec);
+		try {
+			// Closed shape — no Record intersection emitted.
+			expect(contracts).toMatch(/Get_xResponse200 = \{[^&]*\};/s);
+			expect(contracts).not.toMatch(/Get_xResponse200.*Record</s);
 		} finally {
 			await cleanup();
 		}
