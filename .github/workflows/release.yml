@@ -1,26 +1,41 @@
 # Release workflow — publishes to npm with provenance on tag push.
 #
-# Trigger: push of a `v*` tag (created by `npm run release:experimental`).
+# Trigger: push of a `v*` tag (created by `npm run release:experimental`
+# locally, or pushed by hand).
 # Effect: builds, tests, then `npm publish --provenance --tag experimental`.
 #
-# REQUIRED SECRETS / SETUP (one-time):
-#   1. On npmjs.com → Account → Access Tokens → Generate New Token →
-#      type **Automation** (this token bypasses 2FA, which is necessary
-#      for CI publishes — never use a Publish-type token with 2FA in CI).
-#   2. GitHub repo → Settings → Secrets and variables → Actions →
-#      New repository secret → Name: NPM_TOKEN → Value: (the token).
-#   3. Confirm "Allow GitHub Actions to publish with provenance" is on
-#      for the package on npmjs.com (default for new packages).
+# REQUIRED SETUP (one-time, on npmjs.com — NO GitHub secret needed):
+#   1. Sign in to npmjs.com and go to the chowbea-axios package settings:
+#        https://www.npmjs.com/package/chowbea-axios/access
+#   2. Find the "Trusted Publisher" section → Add publisher.
+#   3. Fill in:
+#        Publisher:           GitHub Actions
+#        Organization or user: oddFEELING
+#        Repository:          chowbea-axios
+#        Workflow filename:   release.yml
+#        Environment name:    (leave blank — we don't use GitHub Environments)
+#   4. Save.
 #
-# How provenance works:
-#   - The OIDC token (`id-token: write`) lets npm verify the publish came
-#     from this workflow, this commit, this repo. Adopters can check via
-#     `npm view chowbea-axios provenance` after install.
-#   - No code signing keys to manage — GitHub's OIDC + Sigstore handle it.
+# That's the entire setup. No NPM_TOKEN secret in this repo, no long-lived
+# access tokens to rotate. The OIDC token GitHub mints for this workflow
+# proves the publish came from this repo + this workflow file; npm verifies
+# it against the Trusted Publisher config and authorizes the publish.
+#
+# Adopters can verify provenance after install via:
+#   npm view chowbea-axios provenance
+#
+# Why Trusted Publishing instead of the older "Automation token" approach:
+#   - No long-lived secret to leak or rotate
+#   - npm's UI now actively warns against the "Bypass 2FA" token type
+#   - OIDC scopes the trust to *this* workflow file, not the whole account
 #
 # Manual fallback (if this workflow is broken):
 #   Use the local `npm run release:experimental` script. That path stays
 #   working — it just won't have provenance attestation.
+#
+# Requirements (provided by GitHub-hosted runner + actions/setup-node@v6):
+#   - npm CLI >= 11.5.1
+#   - Node >= 22.14.0
 name: release
 
 on:
@@ -30,7 +45,7 @@ on:
 
 # Default-deny except where required.
 #   contents: read   — checkout
-#   id-token: write  — OIDC token for npm provenance attestation
+#   id-token: write  — OIDC token for Trusted Publishing + provenance
 permissions:
   contents: read
   id-token: write
@@ -41,7 +56,9 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # Defense-in-depth: only run for tags pushed to the canonical repo,
-    # not forks or accidental tag mirrors.
+    # not forks or accidental tag mirrors. (Trusted Publisher config on
+    # npmjs is already scoped to this repo, but the extra guard avoids
+    # spending CI minutes on doomed publishes from forks.)
     if: github.repository == 'oddFEELING/chowbea-axios'
     steps:
       - name: Checkout
@@ -52,8 +69,9 @@ jobs:
         with:
           node-version: "22"
           cache: npm
-          # Points npm at the public registry and sets up the auth token.
-          # The token lives in NPM_TOKEN, exposed below as NODE_AUTH_TOKEN.
+          # registry-url is still required for Trusted Publishing — it
+          # tells npm where to send the publish + OIDC token. We just
+          # don't set NODE_AUTH_TOKEN; OIDC handles auth.
           registry-url: "https://registry.npmjs.org"
 
       - name: Install dependencies
@@ -81,7 +99,7 @@ jobs:
           fi
           echo "Version matches tag: $PKG_VERSION"
 
-      - name: Publish to npm (with provenance)
+      - name: Publish to npm (with provenance via Trusted Publishing)
+        # No NODE_AUTH_TOKEN: OIDC token from `id-token: write` permission
+        # is exchanged for a scoped npm credential at publish time.
         run: npm publish --provenance --tag experimental
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
