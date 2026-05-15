@@ -1,0 +1,56 @@
+# release-please — automates versioning + CHANGELOG from conventional commits.
+#
+# How it works:
+#   1. On every push to `main`, this workflow runs `release-please`.
+#   2. release-please reads commits since the last release tag, decides the
+#      next version per semver (feat → minor, fix → patch, feat! or
+#      BREAKING CHANGE: → major), and opens (or updates) a release PR
+#      titled "chore(main): release X.Y.Z".
+#   3. The release PR contains:
+#        - package.json + package-lock.json version bump
+#        - CHANGELOG.md entry generated from the commits
+#        - .release-please-manifest.json updated
+#   4. When you merge that PR, release-please creates a git tag and a
+#      GitHub Release. The tag fires .github/workflows/release.yml,
+#      which publishes to npm with provenance (via Trusted Publishing).
+#
+# First-time bootstrap:
+#   release-please-config.json currently has `"release-as": "2.0.0"` for
+#   this package — a one-time override that forces the first release-please
+#   PR to cut exactly 2.0.0 (graduating out of the alpha line) instead of
+#   computing a next version from commit semantics. Remove that field
+#   AFTER 2.0.0 ships; from then on, release-please picks the next
+#   version automatically.
+#
+# Conventional commit cheat sheet:
+#   feat: <subject>           → minor bump   (1.2.3 → 1.3.0)
+#   fix: <subject>            → patch bump   (1.2.3 → 1.2.4)
+#   feat!: <subject>          → major bump   (1.2.3 → 2.0.0)
+#   docs/chore/ci/test/build: → no version bump (hidden from CHANGELOG)
+#
+# Permissions:
+#   contents: write        — create commits, tags, releases
+#   pull-requests: write   — open/update the release PR
+name: release-please
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Defense-in-depth: only run on the canonical repo.
+    if: github.repository == 'oddFEELING/chowbea-axios'
+    steps:
+      - name: Run release-please
+        uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        with:
+          # Manifest-driven config — both files at repo root.
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json

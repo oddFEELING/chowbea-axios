@@ -1,0 +1,28 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "node",
+  "include-component-in-tag": false,
+  "tag-separator": "-",
+  "bootstrap-sha": "5bfbd66c76b6725542b352d4ee0ceb821763578c",
+  "changelog-sections": [
+    { "type": "feat", "section": "Added", "hidden": false },
+    { "type": "fix", "section": "Fixed", "hidden": false },
+    { "type": "perf", "section": "Changed", "hidden": false },
+    { "type": "refactor", "section": "Changed", "hidden": false },
+    { "type": "revert", "section": "Changed", "hidden": false },
+    { "type": "security", "section": "Security", "hidden": false },
+    { "type": "deps", "section": "Changed", "hidden": false },
+    { "type": "docs", "section": "Documentation", "hidden": true },
+    { "type": "test", "section": "Tests", "hidden": true },
+    { "type": "build", "section": "Build", "hidden": true },
+    { "type": "ci", "section": "CI", "hidden": true },
+    { "type": "chore", "section": "Chore", "hidden": true }
+  ],
+  "packages": {
+    ".": {
+      "release-as": "2.0.0",
+      "changelog-path": "CHANGELOG.md",
+      "package-name": "chowbea-axios"
+    }
+  }
+}

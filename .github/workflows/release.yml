@@ -1,8 +1,19 @@
 # Release workflow — publishes to npm with provenance on tag push.
 #
-# Trigger: push of a `v*` tag (created by `npm run release:experimental`
-# locally, or pushed by hand).
-# Effect: builds, tests, then `npm publish --provenance --tag experimental`.
+# Trigger: push of a `v*` tag (typically created by merging a release-please
+# PR — see .github/workflows/release-please.yml — or by the local
+# `release:experimental` script for off-cycle prereleases).
+# Effect: builds, tests, then `npm publish --provenance`.
+#
+# Dist-tag routing is decided by `npm publish` from the version itself:
+#   - Stable versions (e.g. 2.0.0)          → `latest` dist-tag
+#   - Prerelease versions (e.g. 2.0.0-alpha) → no automatic dist-tag
+#
+# That means a 2.0.0 publish takes over `latest` automatically (which is
+# what we want once 2.0.0 graduates out of alpha). Prerelease publishes
+# leave the published version reachable only by exact version; if you
+# want them under the `alpha` or `experimental` tag, set it manually
+# after the publish lands: `npm dist-tag add chowbea-axios@<ver> alpha`.
 #
 # REQUIRED SETUP (one-time, on npmjs.com — NO GitHub secret needed):
 #   1. Sign in to npmjs.com and go to the chowbea-axios package settings:
@@ -102,4 +113,6 @@ jobs:
       - name: Publish to npm (with provenance via Trusted Publishing)
         # No NODE_AUTH_TOKEN: OIDC token from `id-token: write` permission
         # is exchanged for a scoped npm credential at publish time.
-        run: npm publish --provenance --tag experimental
+        # No --tag flag: npm picks the dist-tag from the version's
+        # prerelease suffix (stable → latest, prerelease → none).
+        run: npm publish --provenance
