@@ -15,6 +15,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/oddFEELING/chowbea-axios/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/oddFEELING/chowbea-axios/ci.yml?branch=main&style=flat-square&color=10b981" alt="CI" /></a>
   <a href="https://github.com/oddFEELING/chowbea-axios/stargazers"><img src="https://img.shields.io/github/stars/oddFEELING/chowbea-axios?style=flat-square&color=10b981" alt="GitHub stars" /></a>
   <a href="https://www.npmjs.com/package/chowbea-axios"><img src="https://img.shields.io/npm/v/chowbea-axios?style=flat-square&color=10b981" alt="npm version" /></a>
   <a href="https://www.npmjs.com/package/chowbea-axios"><img src="https://img.shields.io/npm/dm/chowbea-axios?style=flat-square&color=10b981" alt="npm downloads" /></a>

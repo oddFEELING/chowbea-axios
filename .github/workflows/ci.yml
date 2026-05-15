@@ -1,0 +1,125 @@
+# Continuous integration for chowbea-axios itself.
+#
+# What runs:
+#   - On every PR and every push to `main`
+#   - Matrix: 3 operating systems (ubuntu/macos/windows) × 3 Node majors (20/22/24)
+#   - Per job: install → build (tsc) → test (vitest)
+#
+# Why a 9-cell matrix:
+#   - The generator does cross-platform path handling (see Windows path fixes
+#     in alpha.20 / commit e8213fc). Without Windows in CI those regress silently.
+#   - Adopters run on whatever LTS they have. Engines declare `>=20`, so 20/22/24
+#     all need to pass.
+#
+# Third-party actions are pinned to commit SHAs (not version tags) — a tag can
+# be re-pointed at malicious code, a commit SHA cannot. Bump these via
+# Dependabot (see .github/dependabot.yml).
+name: ci
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+
+# Cancel in-flight runs on the same ref when a new commit arrives.
+# Saves minutes and avoids stale CI signal on rapid pushes.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Default-deny: only contents:read for checking out the repo.
+# No write scopes needed — this workflow only reports status.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: test (${{ matrix.os }} / Node ${{ matrix.node }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      # One failure shouldn't cancel the rest of the matrix — we want to see
+      # which OS/Node combinations break, not just the first.
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ["20", "22", "24"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Node.js ${{ matrix.node }}
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ matrix.node }}
+          # Built-in npm cache keyed on package-lock.json. Drastically reduces
+          # cold-install time for the matrix.
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (tsc)
+        run: npm run build
+
+      - name: Test (vitest)
+        run: npm test
+
+  pack-check:
+    # Verifies the published tarball contains the files we expect and excludes
+    # the ones we don't (src/, tests/, docs/, .planning/). Catches regressions
+    # in package.json#files whitelist before a release ships.
+    name: pack-check
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Pack and list tarball contents
+        run: |
+          npm pack --dry-run --json > pack.json
+          echo "=== Files that will ship ==="
+          node -e "const p=require('./pack.json');p[0].files.map(f=>f.path).sort().forEach(f=>console.log(f))"
+
+      - name: Assert LICENSE, SECURITY.md, README.md present in tarball
+        run: |
+          node <<'NODE'
+          const required = ['LICENSE', 'SECURITY.md', 'README.md', 'package.json'];
+          const pack = require('./pack.json')[0];
+          const files = new Set(pack.files.map(f => f.path));
+          const missing = required.filter(f => !files.has(f));
+          if (missing.length > 0) {
+            console.error('Tarball missing required files:', missing.join(', '));
+            process.exit(1);
+          }
+          console.log('All required files present in tarball.');
+          NODE
+
+      - name: Assert no source/test/planning files leaked into tarball
+        run: |
+          node <<'NODE'
+          const pack = require('./pack.json')[0];
+          const banned = pack.files
+            .map(f => f.path)
+            .filter(p => /^(src|tests|docs|\.planning)\//.test(p));
+          if (banned.length > 0) {
+            console.error('Tarball contains files that should be excluded:');
+            banned.forEach(p => console.error('  ' + p));
+            process.exit(1);
+          }
+          console.log('No source/test/planning files leaked into tarball.');
+          NODE

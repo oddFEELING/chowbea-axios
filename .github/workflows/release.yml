@@ -1,0 +1,105 @@
+# Release workflow — publishes to npm with provenance on tag push.
+#
+# Trigger: push of a `v*` tag (created by `npm run release:experimental`
+# locally, or pushed by hand).
+# Effect: builds, tests, then `npm publish --provenance --tag experimental`.
+#
+# REQUIRED SETUP (one-time, on npmjs.com — NO GitHub secret needed):
+#   1. Sign in to npmjs.com and go to the chowbea-axios package settings:
+#        https://www.npmjs.com/package/chowbea-axios/access
+#   2. Find the "Trusted Publisher" section → Add publisher.
+#   3. Fill in:
+#        Publisher:           GitHub Actions
+#        Organization or user: oddFEELING
+#        Repository:          chowbea-axios
+#        Workflow filename:   release.yml
+#        Environment name:    (leave blank — we don't use GitHub Environments)
+#   4. Save.
+#
+# That's the entire setup. No NPM_TOKEN secret in this repo, no long-lived
+# access tokens to rotate. The OIDC token GitHub mints for this workflow
+# proves the publish came from this repo + this workflow file; npm verifies
+# it against the Trusted Publisher config and authorizes the publish.
+#
+# Adopters can verify provenance after install via:
+#   npm view chowbea-axios provenance
+#
+# Why Trusted Publishing instead of the older "Automation token" approach:
+#   - No long-lived secret to leak or rotate
+#   - npm's UI now actively warns against the "Bypass 2FA" token type
+#   - OIDC scopes the trust to *this* workflow file, not the whole account
+#
+# Manual fallback (if this workflow is broken):
+#   Use the local `npm run release:experimental` script. That path stays
+#   working — it just won't have provenance attestation.
+#
+# Requirements (provided by GitHub-hosted runner + actions/setup-node@v6):
+#   - npm CLI >= 11.5.1
+#   - Node >= 22.14.0
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+# Default-deny except where required.
+#   contents: read   — checkout
+#   id-token: write  — OIDC token for Trusted Publishing + provenance
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    name: publish to npm
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Defense-in-depth: only run for tags pushed to the canonical repo,
+    # not forks or accidental tag mirrors. (Trusted Publisher config on
+    # npmjs is already scoped to this repo, but the extra guard avoids
+    # spending CI minutes on doomed publishes from forks.)
+    if: github.repository == 'oddFEELING/chowbea-axios'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+          cache: npm
+          # registry-url is still required for Trusted Publishing — it
+          # tells npm where to send the publish + OIDC token. We just
+          # don't set NODE_AUTH_TOKEN; OIDC handles auth.
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        # Re-running tests on the exact published commit is the last
+        # safety net before a tarball ships. If this fails, the tag is
+        # bad and should be deleted.
+        run: npm test
+
+      - name: Verify package.json version matches tag
+        # Catches the case where the tag was pushed without a matching
+        # version bump in package.json — would silently re-publish the
+        # previous version under a new tag.
+        run: |
+          PKG_VERSION=$(node -p "require('./package.json').version")
+          TAG_VERSION=${GITHUB_REF_NAME#v}
+          if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
+            echo "Version mismatch: package.json=$PKG_VERSION tag=$TAG_VERSION"
+            exit 1
+          fi
+          echo "Version matches tag: $PKG_VERSION"
+
+      - name: Publish to npm (with provenance via Trusted Publishing)
+        # No NODE_AUTH_TOKEN: OIDC token from `id-token: write` permission
+        # is exchanged for a scoped npm credential at publish time.
+        run: npm publish --provenance --tag experimental
