@@ -147,6 +147,9 @@ function generateOperationFunction(operation: OperationMetadata): string {
 	jsdoc.push(`   * @operationId ${escapeJsdoc(operationId)}`);
 	jsdoc.push(`   * @method ${method.toUpperCase()}`);
 	jsdoc.push(`   * @path ${escapeJsdoc(pathTemplate)}`);
+	if (pathParams.length > 0) {
+		jsdoc.push("   * @remarks Path parameter values are URL-encoded by the underlying HTTP layer (axios) before the request is dispatched. Callers may pass raw values.");
+	}
 	jsdoc.push("   */");
 
 	// Generate function with explicit return type - uses Result<T> for consistent error handling.
