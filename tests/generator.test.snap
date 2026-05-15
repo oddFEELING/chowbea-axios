@@ -1190,6 +1190,33 @@ type RequestConfig<Q> = Omit<AxiosRequestConfig, "params"> & {
   params?: Q
 }
 
+/**
+ * Structural type for the runtime HTTP client that \`createOperations\` wraps.
+ *
+ * Defined locally (rather than imported from \`../api.client\`) to avoid a
+ * circular type-only import: \`api.client.ts\` imports \`createOperations\`
+ * from this file, so the dependency arrow points one way.
+ *
+ * Parameter types are intentionally permissive (\`any\` / \`any[]\`) because
+ * the real runtime client in \`api.client.ts\` declares its methods generic
+ * over the OpenAPI \`paths\` keyset (e.g. \`get<P extends Paths>(url: P, ...)\`),
+ * which is strictly narrower than this structural shape. Loosening here is
+ * what allows the typed runtime client to be assignable to \`ApiClient\`.
+ * The wrapping operation functions declare their own concrete return types
+ * (e.g. \`Promise<Result<GetUserResponse>>\`), so the \`any\` here does not
+ * leak into the public surface of \`createOperations\`'s return value.
+ */
+interface ApiClient {
+  get: (path: any, ...rest: any[]) => Promise<Result<any>>
+  post: (path: any, ...rest: any[]) => Promise<Result<any>>
+  put: (path: any, ...rest: any[]) => Promise<Result<any>>
+  delete: (path: any, ...rest: any[]) => Promise<Result<any>>
+  patch: (path: any, ...rest: any[]) => Promise<Result<any>>
+  options: (path: any, ...rest: any[]) => Promise<Result<any>>
+  head: (path: any, ...rest: any[]) => Promise<Result<any>>
+  trace: (path: any, ...rest: any[]) => Promise<Result<any>>
+}
+
 /* ~ =================================== ~ */
 /* -- Generated Operations -- */
 /* ~ =================================== ~ */
@@ -1197,20 +1224,20 @@ type RequestConfig<Q> = Omit<AxiosRequestConfig, "params"> & {
 /**
  * Collection of all API operations extracted from the OpenAPI spec.
  * Each operation is a typed function that wraps the underlying apiClient methods.
- * 
+ *
  * @example
  * \`\`\`typescript
  * // Using operation-based API
  * await apiClient.op.getUserById({ id: "123" })
- * 
+ *
  * // With query parameters
  * await apiClient.op.listUsers({ params: { limit: 10, offset: 0 } })
- * 
+ *
  * // With request body
  * await apiClient.op.createUser({ name: "John", email: "john@example.com" })
  * \`\`\`
  */
-export const createOperations = (apiClient: any) => ({
+export const createOperations = (apiClient: ApiClient) => ({
   /**
    * Get user by id (kebab-case operationId — issue #13)
    * Multi-line description containing *\\/ comment-break attempt (issue #14).
@@ -1218,6 +1245,7 @@ export const createOperations = (apiClient: any) => ({
    * @operationId get-user
    * @method GET
    * @path /users/{id}
+   * @remarks Path parameter values are URL-encoded by the underlying HTTP layer (axios) before the request is dispatched. Callers may pass raw values.
    */
   "get-user": (pathParams: Get_userPathParams, config?: AxiosRequestConfig): Promise<Result<Get_userResponse>> => apiClient.get("/users/{id}", pathParams, config),
 
@@ -1227,6 +1255,7 @@ export const createOperations = (apiClient: any) => ({
    * @operationId head-user
    * @method HEAD
    * @path /users/{id}
+   * @remarks Path parameter values are URL-encoded by the underlying HTTP layer (axios) before the request is dispatched. Callers may pass raw values.
    */
   "head-user": (pathParams: Head_userPathParams, config?: AxiosRequestConfig): Promise<Result<unknown>> => apiClient.head("/users/{id}", pathParams, config),
 
@@ -1426,6 +1455,33 @@ type RequestConfig<Q> = Omit<AxiosRequestConfig, "params"> & {
   params?: Q
 }
 
+/**
+ * Structural type for the runtime HTTP client that \`createOperations\` wraps.
+ *
+ * Defined locally (rather than imported from \`../api.client\`) to avoid a
+ * circular type-only import: \`api.client.ts\` imports \`createOperations\`
+ * from this file, so the dependency arrow points one way.
+ *
+ * Parameter types are intentionally permissive (\`any\` / \`any[]\`) because
+ * the real runtime client in \`api.client.ts\` declares its methods generic
+ * over the OpenAPI \`paths\` keyset (e.g. \`get<P extends Paths>(url: P, ...)\`),
+ * which is strictly narrower than this structural shape. Loosening here is
+ * what allows the typed runtime client to be assignable to \`ApiClient\`.
+ * The wrapping operation functions declare their own concrete return types
+ * (e.g. \`Promise<Result<GetUserResponse>>\`), so the \`any\` here does not
+ * leak into the public surface of \`createOperations\`'s return value.
+ */
+interface ApiClient {
+  get: (path: any, ...rest: any[]) => Promise<Result<any>>
+  post: (path: any, ...rest: any[]) => Promise<Result<any>>
+  put: (path: any, ...rest: any[]) => Promise<Result<any>>
+  delete: (path: any, ...rest: any[]) => Promise<Result<any>>
+  patch: (path: any, ...rest: any[]) => Promise<Result<any>>
+  options: (path: any, ...rest: any[]) => Promise<Result<any>>
+  head: (path: any, ...rest: any[]) => Promise<Result<any>>
+  trace: (path: any, ...rest: any[]) => Promise<Result<any>>
+}
+
 /* ~ =================================== ~ */
 /* -- Generated Operations -- */
 /* ~ =================================== ~ */
@@ -1433,20 +1489,20 @@ type RequestConfig<Q> = Omit<AxiosRequestConfig, "params"> & {
 /**
  * Collection of all API operations extracted from the OpenAPI spec.
  * Each operation is a typed function that wraps the underlying apiClient methods.
- * 
+ *
  * @example
  * \`\`\`typescript
  * // Using operation-based API
  * await apiClient.op.getUserById({ id: "123" })
- * 
+ *
  * // With query parameters
  * await apiClient.op.listUsers({ params: { limit: 10, offset: 0 } })
- * 
+ *
  * // With request body
  * await apiClient.op.createUser({ name: "John", email: "john@example.com" })
  * \`\`\`
  */
-export const createOperations = (apiClient: any) => ({
+export const createOperations = (apiClient: ApiClient) => ({
   /**
    * List pets
    * 
@@ -1471,6 +1527,7 @@ export const createOperations = (apiClient: any) => ({
    * @operationId getPetById
    * @method GET
    * @path /pets/{petId}
+   * @remarks Path parameter values are URL-encoded by the underlying HTTP layer (axios) before the request is dispatched. Callers may pass raw values.
    */
   getPetById: (pathParams: GetPetByIdPathParams, config?: AxiosRequestConfig): Promise<Result<GetPetByIdResponse>> => apiClient.get("/pets/{petId}", pathParams, config),
 
@@ -1479,6 +1536,7 @@ export const createOperations = (apiClient: any) => ({
    * @operationId deletePet
    * @method DELETE
    * @path /pets/{petId}
+   * @remarks Path parameter values are URL-encoded by the underlying HTTP layer (axios) before the request is dispatched. Callers may pass raw values.
    */
   deletePet: (pathParams: DeletePetPathParams, config?: AxiosRequestConfig): Promise<Result<unknown>> => apiClient.delete("/pets/{petId}", pathParams, config),
 }) as const

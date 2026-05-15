@@ -175,6 +175,10 @@ If chowbea-axios helps you ship faster, consider giving it a star! It helps othe
   </a>
 </p>
 
+## Security
+
+Found a security issue? Please follow our [responsible disclosure policy](SECURITY.md) — do **not** file a public GitHub issue.
+
 ## License
 
 MIT

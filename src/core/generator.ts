@@ -147,6 +147,9 @@ function generateOperationFunction(operation: OperationMetadata): string {
 	jsdoc.push(`   * @operationId ${escapeJsdoc(operationId)}`);
 	jsdoc.push(`   * @method ${method.toUpperCase()}`);
 	jsdoc.push(`   * @path ${escapeJsdoc(pathTemplate)}`);
+	if (pathParams.length > 0) {
+		jsdoc.push("   * @remarks Path parameter values are URL-encoded by the underlying HTTP layer (axios) before the request is dispatched. Callers may pass raw values.");
+	}
 	jsdoc.push("   */");
 
 	// Generate function with explicit return type - uses Result<T> for consistent error handling.
@@ -531,6 +534,33 @@ type RequestConfig<Q> = Omit<AxiosRequestConfig, "params"> & {
   params?: Q
 }
 
+/**
+ * Structural type for the runtime HTTP client that \`createOperations\` wraps.
+ *
+ * Defined locally (rather than imported from \`../api.client\`) to avoid a
+ * circular type-only import: \`api.client.ts\` imports \`createOperations\`
+ * from this file, so the dependency arrow points one way.
+ *
+ * Parameter types are intentionally permissive (\`any\` / \`any[]\`) because
+ * the real runtime client in \`api.client.ts\` declares its methods generic
+ * over the OpenAPI \`paths\` keyset (e.g. \`get<P extends Paths>(url: P, ...)\`),
+ * which is strictly narrower than this structural shape. Loosening here is
+ * what allows the typed runtime client to be assignable to \`ApiClient\`.
+ * The wrapping operation functions declare their own concrete return types
+ * (e.g. \`Promise<Result<GetUserResponse>>\`), so the \`any\` here does not
+ * leak into the public surface of \`createOperations\`'s return value.
+ */
+interface ApiClient {
+  get: (path: any, ...rest: any[]) => Promise<Result<any>>
+  post: (path: any, ...rest: any[]) => Promise<Result<any>>
+  put: (path: any, ...rest: any[]) => Promise<Result<any>>
+  delete: (path: any, ...rest: any[]) => Promise<Result<any>>
+  patch: (path: any, ...rest: any[]) => Promise<Result<any>>
+  options: (path: any, ...rest: any[]) => Promise<Result<any>>
+  head: (path: any, ...rest: any[]) => Promise<Result<any>>
+  trace: (path: any, ...rest: any[]) => Promise<Result<any>>
+}
+
 /* ~ =================================== ~ */
 /* -- Generated Operations -- */
 /* ~ =================================== ~ */
@@ -538,20 +568,20 @@ type RequestConfig<Q> = Omit<AxiosRequestConfig, "params"> & {
 /**
  * Collection of all API operations extracted from the OpenAPI spec.
  * Each operation is a typed function that wraps the underlying apiClient methods.
- * 
+ *
  * @example
  * \`\`\`typescript
  * // Using operation-based API
  * await apiClient.op.getUserById({ id: "123" })
- * 
+ *
  * // With query parameters
  * await apiClient.op.listUsers({ params: { limit: 10, offset: 0 } })
- * 
+ *
  * // With request body
  * await apiClient.op.createUser({ name: "John", email: "john@example.com" })
  * \`\`\`
  */
-export const createOperations = (apiClient: any) => ({
+export const createOperations = (apiClient: ApiClient) => ({
 `;
 
 	const operationFunctions = operations
