@@ -22,7 +22,8 @@
     "bin",
     "dist",
     "templates",
-    "LICENSE"
+    "LICENSE",
+    "SECURITY.md"
   ],
   "scripts": {
     "build": "tsc",
