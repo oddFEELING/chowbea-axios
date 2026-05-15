@@ -21,7 +21,8 @@
   "files": [
     "bin",
     "dist",
-    "templates"
+    "templates",
+    "LICENSE"
   ],
   "scripts": {
     "build": "tsc",
