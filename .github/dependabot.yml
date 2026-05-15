@@ -1,0 +1,48 @@
+# Dependabot config — weekly dep + action updates.
+#
+# Two ecosystems:
+#   1. npm — application dependencies in package.json
+#   2. github-actions — workflow YAML in .github/workflows/
+#
+# Updates are grouped per ecosystem so we don't get a flood of single-dep
+# PRs every week. Major-version bumps still come as individual PRs so they
+# can be reviewed in isolation.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    groups:
+      # Group all minor + patch bumps into one PR per ecosystem to reduce noise.
+      # Majors stay separate (they're more likely to break and deserve a focused
+      # review).
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    # Ignore axios major bumps for now — it's an exported peer-shape concern
+    # and a breaking change there ripples into adopter code. Reconsider if/when
+    # we add a runtime-behavior test that exercises axios edge cases.
+    ignore:
+      - dependency-name: axios
+        update-types: [version-update:semver-major]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+      - tooling
+    groups:
+      actions-minor-and-patch:
+        update-types:
+          - minor
+          - patch
