@@ -2,7 +2,10 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { GeneratorPaths } from "../../src/core/generator.js";
+import type {
+	GenerationHooks,
+	GeneratorPaths,
+} from "../../src/core/generator.js";
 import { generate, generateClientFiles } from "../../src/core/generator.js";
 import type { InstanceConfig } from "../../src/core/config.js";
 import { DEFAULT_INSTANCE_CONFIG } from "../../src/core/config.js";
@@ -61,25 +64,33 @@ export async function makeTempPaths(): Promise<{
 
 /**
  * Run the generator end-to-end against an in-memory spec.
- * Skips `openapi-typescript` (the dlx step) so tests don't depend on
- * spawning a child process or being online.
+ *
+ * Exercises the full pipeline including openapi-typescript type emission
+ * (now in-process via the Node API — see L4). Tests that need to feed in
+ * deliberately invalid specs should construct ones that pass Redocly
+ * validation but exercise chowbea's own fallback paths.
  *
  * On any failure (writeFile / generate / readFile), the temp tree is
  * removed before the error propagates so tests don't leak temp dirs
  * across failure cases.
  */
-export async function runGenerator(spec: object): Promise<{
+export async function runGenerator(
+	spec: object,
+	hooks?: GenerationHooks,
+): Promise<{
 	operations: string;
 	contracts: string;
+	types: string;
 	cleanup: () => Promise<void>;
 }> {
 	const { paths, cleanup } = await makeTempPaths();
 	try {
 		await writeFile(paths.spec, JSON.stringify(spec, null, 2), "utf8");
-		await generate({ paths, logger: SILENT_LOGGER, skipTypes: true });
+		await generate({ paths, logger: SILENT_LOGGER, hooks });
 		const operations = await readFile(paths.operations, "utf8");
 		const contracts = await readFile(paths.contracts, "utf8");
-		return { operations, contracts, cleanup };
+		const types = await readFile(paths.types, "utf8");
+		return { operations, contracts, types, cleanup };
 	} catch (err) {
 		await cleanup();
 		throw err;

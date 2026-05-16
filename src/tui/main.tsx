@@ -8,7 +8,6 @@ import { findProjectRoot } from "../core/config.js";
 import {
 	commandExists,
 	detectPackageManager,
-	getDlxCommand,
 	getInstallCommand,
 	resolveCommand,
 } from "../core/pm.js";
@@ -60,36 +59,6 @@ async function installPackage(
 		stdio: "inherit",
 		timeout: 60_000,
 	});
-}
-
-/**
- * Pre-caches openapi-typescript so dlx/npx doesn't download it mid-operation.
- */
-async function ensureOpenApiTypescript(projectRoot: string): Promise<void> {
-	const pm = await detectPackageManager(projectRoot);
-	const [cmd, ...dlxArgs] = getDlxCommand(pm);
-
-	// Drop `shell: true` (Node 24 DEP0190); resolveCommand handles
-	// Windows .cmd shims. Issue #16.
-	const check = spawnSync(
-		resolveCommand(cmd),
-		[...dlxArgs, "openapi-typescript", "--version"],
-		{
-			cwd: projectRoot,
-			stdio: "pipe",
-			timeout: 30_000,
-		},
-	);
-
-	if (check.status !== 0) {
-		console.log("Pre-caching openapi-typescript (used for type generation)...");
-		// Run it once so dlx/npx caches the package
-		spawnSync(resolveCommand(cmd), [...dlxArgs, "openapi-typescript", "--help"], {
-			cwd: projectRoot,
-			stdio: "pipe",
-			timeout: 60_000,
-		});
-	}
 }
 
 /**
@@ -151,9 +120,6 @@ async function ensureProjectDependencies(): Promise<void> {
 		) {
 			await installPackage(projectRoot, "concurrently", true);
 		}
-
-		// 5. Pre-cache openapi-typescript
-		await ensureOpenApiTypescript(projectRoot);
 	} catch {
 		// Non-fatal — the TUI will still launch
 	}

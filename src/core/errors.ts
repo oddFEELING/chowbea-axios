@@ -118,9 +118,7 @@ export class GenerationError extends ChowbeaAxiosError {
 		super(
 			`Generation failed during ${phase}: ${message}`,
 			"GENERATION_ERROR",
-			phase === "openapi-typescript"
-				? "Ensure 'openapi-typescript' is available. It is downloaded automatically via your package manager's dlx/npx command."
-				: "Check the error details above. Previous generated files have been preserved."
+			"Check the error details above. Previous generated files have been preserved."
 		);
 		this.name = "GenerationError";
 		this.phase = phase;

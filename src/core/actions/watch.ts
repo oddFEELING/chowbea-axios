@@ -23,6 +23,8 @@ import {
 	saveSpec,
 } from "../fetcher.js";
 import { generate, generateClientFiles } from "../generator.js";
+import type { GenerationHooks } from "../generator.js";
+import { loadHooks } from "../hooks-loader.js";
 
 /**
  * Options for the watch action.
@@ -128,6 +130,9 @@ export async function executeWatch(
 		logger,
 	});
 
+	// Load optional generator hooks once at startup; reused on every cycle.
+	const hooks = await loadHooks(projectRoot, logger);
+
 	// Determine polling interval and spec source (local file or remote endpoint)
 	const intervalMs = options.intervalMs ?? config.poll_interval_ms;
 	const specSource = resolveSpecSource(config, projectRoot);
@@ -164,6 +169,7 @@ export async function executeWatch(
 			outputPaths,
 			logger,
 			headers: config.fetch?.headers,
+			hooks,
 			callbacks,
 		});
 
@@ -221,10 +227,18 @@ async function runCycle(options: {
 	outputPaths: ReturnType<typeof getOutputPaths>;
 	logger: Logger;
 	headers?: Record<string, string>;
+	hooks: GenerationHooks;
 	callbacks?: WatchCallbacks;
 }): Promise<boolean> {
-	const { cycleId, specSource, outputPaths, logger, headers, callbacks } =
-		options;
+	const {
+		cycleId,
+		specSource,
+		outputPaths,
+		logger,
+		headers,
+		hooks,
+		callbacks,
+	} = options;
 	const startTime = Date.now();
 
 	// Notify cycle start
@@ -307,6 +321,7 @@ async function runCycle(options: {
 		const result = await generate({
 			paths: outputPaths,
 			logger,
+			hooks,
 		});
 
 		const durationMs = Date.now() - startTime;

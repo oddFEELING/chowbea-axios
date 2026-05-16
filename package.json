@@ -33,12 +33,17 @@
     "prepublishOnly": "npm run build",
     "release:experimental": "npm ci && npm test && npm version prerelease --preid=alpha -m \"chore(release): v%s\" && git push --follow-tags",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "test:types": "vitest run --typecheck.only",
+    "test:types:strict": "tsc --noEmit -p tsconfig.tests.strict.json",
+    "bench": "vitest bench --run"
   },
   "dependencies": {
     "@inquirer/prompts": "^8.4.3",
     "@opentui/core": "^0.2.1",
     "@opentui/react": "^0.2.1",
+    "openapi-typescript": "^7.13.0",
+    "openapi-typescript-helpers": "^0.1.0",
     "picocolors": "^1.1.1",
     "react": "^19.2.4",
     "toml": "^3.0.0",

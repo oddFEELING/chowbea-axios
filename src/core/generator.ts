@@ -3,7 +3,6 @@
  * Migrated from scripts/generate-operations.js with atomic writes and rollback.
  */
 
-import { spawnSync } from "node:child_process";
 import {
 	access,
 	copyFile,
@@ -12,7 +11,25 @@ import {
 	unlink,
 	writeFile,
 } from "node:fs/promises";
-import { findProjectRoot } from "./config.js";
+import openapiTS, { astToString } from "openapi-typescript";
+import type { OpenAPITSOptions } from "openapi-typescript";
+
+/**
+ * Hooks that consumers can supply to modify the openapi-typescript output.
+ * These are passed straight through to the underlying `openapiTS()` call —
+ * see the openapi-typescript advanced docs for the AST conventions.
+ *
+ * Common uses:
+ *   - `transform`: convert `format: date-time` to `Date`, `format: binary`
+ *     to `Blob`, branded types for opaque IDs.
+ *   - `postTransform`: wrap every generated type in a brand or nullable.
+ *   - `transformProperty`: attach JSDoc validation annotations from
+ *     `minLength` / `maxLength` / `pattern` / `x-*` extensions.
+ */
+export type GenerationHooks = Pick<
+	OpenAPITSOptions,
+	"transform" | "postTransform" | "transformProperty"
+>;
 import type { InstanceConfig, OutputPaths } from "./config.js";
 import { GenerationError } from "./errors.js";
 import type { Logger } from "../adapters/logger-interface.js";
@@ -21,7 +38,6 @@ import {
 	HTTP_METHODS,
 	isGeneratableMethod,
 } from "./http-methods.js";
-import { detectPackageManager, getDlxCommand, resolveCommand } from "./pm.js";
 import { pickJsonContent } from "./ref-utils.js";
 
 /**
@@ -1126,47 +1142,28 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 }
 
 /**
- * Runs openapi-typescript to generate base types.
- * Uses the detected package manager's dlx command to avoid requiring it as a direct dependency.
+ * Runs openapi-typescript in-process to generate base TypeScript types.
+ * Uses the Node API (openapiTS + astToString) so we don't pay the
+ * spawn-and-download cost on every generate, and so future hook points
+ * (transform / postTransform / transformProperty — see L5) can plug
+ * straight into the AST.
  */
 async function generateTypes(
 	specPath: string,
 	typesPath: string,
-	logger: Logger
+	logger: Logger,
+	hooks: GenerationHooks = {}
 ): Promise<void> {
 	logger.info({ specPath, typesPath }, "Generating TypeScript types...");
 
-	const projectRoot = await findProjectRoot();
-	const pm = await detectPackageManager(projectRoot);
-	const [cmd, ...dlxArgs] = getDlxCommand(pm);
-
-	logger.debug({ pm, cmd }, "Using package manager for openapi-typescript");
-
-	// No `shell: true` — `specPath` and `typesPath` derive from
-	// `config.output.folder`, a user-controlled string. Passing them through
-	// the shell would allow shell-metacharacter injection. resolveCommand
-	// handles Windows .cmd shims for npx/bunx/etc. Issue #16.
-	const result = spawnSync(
-		resolveCommand(cmd),
-		[...dlxArgs, "openapi-typescript", specPath, "--output", typesPath],
-		{
-			stdio: "pipe",
-			cwd: process.cwd(),
-		}
-	);
-
-	if (result.error) {
+	try {
+		const ast = await openapiTS(new URL(`file://${specPath}`), hooks);
+		await writeFile(typesPath, astToString(ast), "utf8");
+	} catch (err) {
+		const message = err instanceof Error ? err.message : String(err);
 		throw new GenerationError(
 			"openapi-typescript",
-			`Failed to spawn: ${result.error.message}`
-		);
-	}
-
-	if (result.status !== 0) {
-		const stderr = result.stderr?.toString() ?? "Unknown error";
-		throw new GenerationError(
-			"openapi-typescript",
-			`Exited with code ${result.status}: ${stderr}`
+			`Failed to generate types: ${message}`
 		);
 	}
 
@@ -1326,12 +1323,26 @@ async function fileExists(filePath: string): Promise<boolean> {
 export function generateHelpersFileContent(): string {
 	return `/**
  * Type utilities for extracting request/response types from OpenAPI schema.
- * 
+ *
+ * Delegates to \`openapi-typescript-helpers\` for the heavy lifting — that
+ * package is maintained alongside openapi-typescript and handles edge
+ * cases (multiple media types, readOnly/writeOnly, all 8 HTTP verbs)
+ * that hand-rolled helpers tend to miss.
+ *
  * This file is generated once by chowbea-axios CLI.
- * You can safely modify this file - it will NOT be overwritten.
+ * You can safely modify this file — it will NOT be overwritten.
  */
 
-import type { paths, components, operations } from "./_generated/api.types";
+import type {
+	FilterKeys,
+	HttpMethod as HttpMethodAll,
+	MediaType,
+	OperationRequestBodyContent,
+	PathsWithMethod,
+	ResponseObjectMap,
+	SuccessResponse,
+} from "openapi-typescript-helpers";
+import type { components, operations, paths } from "./_generated/api.types";
 
 /* ~ =================================== ~ */
 /* -- Base Types -- */
@@ -1340,11 +1351,20 @@ import type { paths, components, operations } from "./_generated/api.types";
 /** All path templates defined by the OpenAPI paths map. */
 type Paths = keyof paths;
 
-/** HTTP methods supported by the client. */
-type HttpMethod = "get" | "post" | "put" | "delete" | "patch";
+/**
+ * HTTP methods supported by the client. The upstream union covers all
+ * eight verbs OpenAPI 3 allows (get/post/put/delete/patch/head/options/trace).
+ */
+type HttpMethod = HttpMethodAll;
 
-/** Resolves the OpenAPI operation schema for a given path and method. */
-type Operation<P extends Paths, M extends HttpMethod> = paths[P][M];
+/**
+ * Resolves the OpenAPI operation schema for a given path and method.
+ *
+ * The \`M & keyof paths[P]\` constraint returns \`never\` (the desired
+ * behaviour) for path/method combinations not declared in the spec,
+ * and keeps the helper compiling under \`noUncheckedIndexedAccess\`.
+ */
+type Operation<P extends Paths, M extends HttpMethod> = paths[P][M & keyof paths[P]];
 
 /* ~ =================================== ~ */
 /* -- Path Parameter Extraction -- */
@@ -1360,72 +1380,6 @@ type ExtractPathParamNames<T extends string> =
 type PathParams<P extends Paths> = ExtractPathParamNames<P & string> extends never
 	? never
 	: Record<ExtractPathParamNames<P & string>, string | number | boolean>;
-
-/* ~ =================================== ~ */
-/* -- Query Parameter Extraction -- */
-/* ~ =================================== ~ */
-
-/** Extracts query parameter types from the OpenAPI operation schema. */
-type QueryParams<P extends Paths, M extends HttpMethod> = Operation<P, M> extends {
-	parameters: { query?: infer Q };
-}
-	? Q extends Record<string, unknown>
-		? Q
-		: never
-	: never;
-
-/* ~ =================================== ~ */
-/* -- Request Body Extraction -- */
-/* ~ =================================== ~ */
-
-/**
- * Infers the request body type for a given path/method pair from OpenAPI.
- *
- * The contracts file already emits File or Blob for format binary
- * fields, so multipart bodies inherit accurate types directly from
- * the spec — no name-based heuristic needed. Issue #22.
- */
-type RequestBody<P extends Paths, M extends HttpMethod> = Operation<P, M> extends {
-	requestBody: { content: { "application/json": infer T } };
-}
-	? T extends Record<string, never>
-		? Record<string, unknown>
-		: T
-	: Operation<P, M> extends { requestBody?: { content: { "application/json": infer T } } }
-		? T extends Record<string, never>
-			? Record<string, unknown>
-			: T
-		: Operation<P, M> extends { requestBody: { content: { "multipart/form-data": infer T } } }
-			? T
-			: Operation<P, M> extends { requestBody?: { content: { "multipart/form-data": infer T } } }
-				? T
-				: never;
-
-/* ~ =================================== ~ */
-/* -- Response Data Extraction -- */
-/* ~ =================================== ~ */
-
-/** Extracts all available status codes from an operation's responses. */
-type AvailableStatusCodes<P extends Paths, M extends HttpMethod> = Operation<P, M> extends {
-	responses: infer R;
-}
-	? R extends Record<string, unknown>
-		? keyof R & number
-		: never
-	: never;
-
-/** Infers the JSON response body type for a given status code from OpenAPI. */
-type ResponseData<
-	P extends Paths,
-	M extends HttpMethod,
-	Status extends AvailableStatusCodes<P, M> = 200 extends AvailableStatusCodes<P, M>
-		? 200
-		: AvailableStatusCodes<P, M>,
-> = Operation<P, M> extends {
-	responses: { [K in Status]: { content: { "application/json": infer T } } };
-}
-	? T
-	: never;
 
 /* ~ =================================== ~ */
 /* -- Intellisense Helpers -- */
@@ -1461,24 +1415,49 @@ type ExpandRecursively<T> = T extends (...args: infer A) => infer R
 
 /**
  * Extract request body type for a given path and method.
+ *
+ * Returns \`undefined\` when the operation declares no body. Returns the
+ * inferred shape for JSON, multipart, octet-stream — every media type
+ * the spec declares — courtesy of \`OperationRequestBodyContent\`.
+ *
  * @example type CreateUserInput = ApiRequestBody<"/api/users", "post">
  */
 export type ApiRequestBody<P extends Paths, M extends HttpMethod> = ExpandRecursively<
-	RequestBody<P, M>
+	OperationRequestBodyContent<Operation<P, M>>
 >;
 
 /**
- * Extract response data type for a given path, method, and status code.
+ * Extract response data type for a given path, method, status code, and
+ * media type.
+ *
+ * Defaults to the first 2XX success response and any JSON-like media type
+ * (\`application/json\`, \`application/vnd.api+json\`, etc.). Pass a Media
+ * value to narrow to e.g. \`"text/csv"\`, \`"application/octet-stream"\`, or
+ * \`"text/event-stream"\` when the spec declares multiple response shapes.
+ *
  * @example type UserResponse = ApiResponseData<"/api/users/{id}", "get">
  * @example type CreatedResponse = ApiResponseData<"/api/users", "post", 201>
+ * @example type ReportCsv = ApiResponseData<"/api/reports/{id}", "get", 200, "text/csv">
  */
 export type ApiResponseData<
 	P extends Paths,
 	M extends HttpMethod,
-	Status extends AvailableStatusCodes<P, M> = 200 extends AvailableStatusCodes<P, M>
+	Status extends ApiStatusCodes<P, M> = 200 extends ApiStatusCodes<P, M>
 		? 200
-		: AvailableStatusCodes<P, M>,
-> = ExpandRecursively<ResponseData<P, M, Status>>;
+		: ApiStatusCodes<P, M>,
+	Media extends MediaType = \`\${string}/json\`,
+> = ExpandRecursively<
+	FilterKeys<
+		Operation<P, M> extends { responses: infer R }
+			? R extends Record<string | number, unknown>
+				? R[Status & keyof R] extends { content: infer C }
+					? C
+					: never
+				: never
+			: never,
+		Media
+	>
+>;
 
 /**
  * Extract path parameters for a given path.
@@ -1491,27 +1470,37 @@ export type ApiPathParams<P extends Paths> = ExpandRecursively<PathParams<P>>;
  * @example type ListUsersQuery = ApiQueryParams<"/api/users", "get">
  */
 export type ApiQueryParams<P extends Paths, M extends HttpMethod> = ExpandRecursively<
-	QueryParams<P, M>
+	Operation<P, M> extends { parameters: { query?: infer Q } }
+		? Q extends Record<string, unknown>
+			? Q
+			: never
+		: never
 >;
 
 /**
  * Get all available status codes for a given path and method.
  * @example type UserStatusCodes = ApiStatusCodes<"/api/users/{id}", "get">
  */
-export type ApiStatusCodes<P extends Paths, M extends HttpMethod> = AvailableStatusCodes<P, M>;
+export type ApiStatusCodes<P extends Paths, M extends HttpMethod> = keyof ResponseObjectMap<
+	Operation<P, M>
+> &
+	number;
+
+/**
+ * Union of all paths that declare the given method. Useful when narrowing
+ * a generic client method to "only paths that actually support GET", etc.
+ *
+ * @example type ListablePaths = ApiPathsWithMethod<"get">
+ */
+export type ApiPathsWithMethod<M extends HttpMethod> = PathsWithMethod<paths, M>;
 
 /* ~ =================================== ~ */
 /* -- Operation-Based API Type Helpers -- */
 /* ~ =================================== ~ */
 
 /** Extracts all available status codes from an operation's responses by operation ID. */
-type OperationStatusCodes<OpId extends keyof operations> = operations[OpId] extends {
-	responses: infer R;
-}
-	? R extends Record<string, unknown>
-		? keyof R & number
-		: never
-	: never;
+type OperationStatusCodes<OpId extends keyof operations> =
+	keyof ResponseObjectMap<operations[OpId]> & number;
 
 /** Determines the default positive status code for an operation. */
 type OperationPositiveStatus<OpId extends keyof operations> =
@@ -1527,19 +1516,15 @@ type OperationPositiveStatus<OpId extends keyof operations> =
 
 /**
  * Extract request body type by operation ID.
+ *
+ * Returns \`undefined\` when the operation declares no body. Returns the
+ * JSON shape (or any other declared media type) when one is present.
+ *
  * @example type CreateUserInput = ServerRequestBody<"createUser">
  * @see Use concrete types in _generated/api.contracts.ts for cmd+click navigation
  */
 export type ServerRequestBody<OpId extends keyof operations> = ExpandRecursively<
-	operations[OpId] extends { requestBody: { content: { "application/json": infer T } } }
-		? T extends Record<string, never>
-			? Record<string, unknown>
-			: T
-		: operations[OpId] extends { requestBody?: { content: { "application/json": infer T } } }
-			? T extends Record<string, never>
-				? Record<string, unknown>
-				: T
-			: never
+	OperationRequestBodyContent<operations[OpId]>
 >;
 
 /**
@@ -1565,21 +1550,41 @@ export type ServerRequestParams<OpId extends keyof operations> = ExpandRecursive
 >;
 
 /**
- * Extract response type by operation ID with optional status code.
- * Defaults to the positive status code (200, 201, 202, or 204).
+ * Extract response type by operation ID, optional status code, and media type.
+ *
+ * Defaults to the positive status code (200, 201, 202, or 204) and any
+ * JSON-like media type. Pass a Media value to narrow to a specific
+ * content type.
+ *
  * @example type UserResponse = ServerResponseType<"getUserById">
  * @example type NotFoundResponse = ServerResponseType<"getUserById", 404>
+ * @example type ReportCsv = ServerResponseType<"downloadReport", 200, "text/csv">
  * @see Use concrete types in _generated/api.contracts.ts for cmd+click navigation
  */
 export type ServerResponseType<
 	OpId extends keyof operations,
 	Status extends OperationStatusCodes<OpId> = OperationPositiveStatus<OpId>,
+	Media extends MediaType = \`\${string}/json\`,
 > = ExpandRecursively<
-	operations[OpId] extends {
-		responses: { [K in Status]: { content: { "application/json": infer T } } };
-	}
-		? T
-		: never
+	FilterKeys<
+		operations[OpId] extends { responses: infer R }
+			? R extends Record<string | number, unknown>
+				? R[Status & keyof R] extends { content: infer C }
+					? C
+					: never
+				: never
+			: never,
+		Media
+	>
+>;
+
+/**
+ * The body shape returned by the first 2XX response for an operation,
+ * across any declared media type. Equivalent to upstream's
+ * \`SuccessResponse<ResponseObjectMap<operations[OpId]>>\`.
+ */
+export type ServerSuccessResponse<OpId extends keyof operations> = ExpandRecursively<
+	SuccessResponse<ResponseObjectMap<operations[OpId]>>
 >;
 
 /**
@@ -2637,6 +2642,7 @@ export async function generate(options: {
 	dryRun?: boolean;
 	skipTypes?: boolean;
 	skipOperations?: boolean;
+	hooks?: GenerationHooks;
 }): Promise<GenerationResult & { dryRunResult?: DryRunResult }> {
 	const {
 		paths: outputPaths,
@@ -2644,6 +2650,7 @@ export async function generate(options: {
 		dryRun = false,
 		skipTypes = false,
 		skipOperations = false,
+		hooks,
 	} = options;
 	const startTime = Date.now();
 
@@ -2723,7 +2730,7 @@ export async function generate(options: {
 		if (skipTypes) {
 			logger.info("Skipping types generation (--operations-only)");
 		} else {
-			await generateTypes(outputPaths.spec, outputPaths.types, logger);
+			await generateTypes(outputPaths.spec, outputPaths.types, logger, hooks);
 			typesGenerated = true;
 		}
 

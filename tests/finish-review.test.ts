@@ -224,12 +224,24 @@ describe("generator: schemaToTS resolves non-schema $ref kinds (#32)", () => {
 		}
 	});
 
-	it("falls back to unknown for refs into unknown components subtrees", async () => {
+	it("falls back to unknown for refs into non-schema components subtrees", async () => {
+		// The $ref points into components/headers — a valid OpenAPI location,
+		// but not a schema. chowbea's schemaToTS only knows how to inline
+		// schema-shaped things, so the property type falls back to `unknown`.
+		// X-Custom is fully defined so the spec passes openapi-typescript's
+		// Redocly validation; the fallback being tested is in chowbea's
+		// own ref resolver, not in upstream's bundler.
 		const spec = {
 			openapi: "3.0.3",
 			info: { title: "X", version: "1.0.0" },
 			paths: {},
 			components: {
+				headers: {
+					"X-Custom": {
+						description: "A custom header",
+						schema: { type: "string" },
+					},
+				},
 				schemas: {
 					Wrapper: {
 						type: "object",
