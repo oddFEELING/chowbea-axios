@@ -19,6 +19,14 @@
  * be added when L1 lands and the helpers gain `$Read` / `$Write` awareness.
  */
 
+/**
+ * `$Read<T>` / `$Write<T>` markers — inlined exactly the way
+ * `openapi-typescript` emits them when `readWriteMarkers: true` is on.
+ * Real generated files will contain these definitions at the top.
+ */
+export type $Read<T> = { readonly $read: T };
+export type $Write<T> = { readonly $write: T };
+
 export interface paths {
 	"/users": {
 		get: operations["listUsers"];
@@ -56,6 +64,13 @@ export interface paths {
 		// Multi-media endpoint — same status, different content types.
 		get: operations["downloadReport"];
 	};
+	"/accounts/{id}": {
+		// Schema uses readOnly/writeOnly. The request body type should
+		// exclude `id`/`createdAt` (server-controlled), the response
+		// type should exclude `password` (writeOnly, never returned).
+		get: operations["getAccount"];
+		patch: operations["updateAccount"];
+	};
 }
 
 export interface components {
@@ -87,6 +102,15 @@ export interface components {
 			id: string;
 			generatedAt: string;
 			rowCount: number;
+		};
+		Account: {
+			// Marker-wrapped properties match openapi-typescript's emission
+			// when readWriteMarkers: true is enabled.
+			id: $Read<string>;
+			createdAt?: $Read<string>;
+			email: string;
+			name: string;
+			password?: $Write<string>;
 		};
 	};
 	responses: never;
@@ -248,6 +272,42 @@ export interface operations {
 			201: {
 				content: {
 					"application/json": components["schemas"]["UploadResult"];
+				};
+			};
+		};
+	};
+	getAccount: {
+		parameters: {
+			query?: never;
+			header?: never;
+			path: { id: string };
+			cookie?: never;
+		};
+		requestBody?: never;
+		responses: {
+			200: {
+				content: {
+					"application/json": components["schemas"]["Account"];
+				};
+			};
+		};
+	};
+	updateAccount: {
+		parameters: {
+			query?: never;
+			header?: never;
+			path: { id: string };
+			cookie?: never;
+		};
+		requestBody: {
+			content: {
+				"application/json": components["schemas"]["Account"];
+			};
+		};
+		responses: {
+			200: {
+				content: {
+					"application/json": components["schemas"]["Account"];
 				};
 			};
 		};
