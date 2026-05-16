@@ -100,6 +100,8 @@ Run `chowbea-axios <command> --help` for command-specific flags.
 
 ## Interactive Dashboard
 
+> **Status: experimental.** The TUI is functional but has no automated test coverage today. For CI pipelines, scripted workflows, and any production-adjacent use, prefer the headless commands (`fetch`, `generate`, `watch`, etc.). The dashboard is great for interactive exploration but the headless surface is what we guarantee.
+
 Running `chowbea-axios` with **no command** launches an OpenTUI dashboard with screens for fetch, generate, diff, validate, watch, plugins, env management, and an endpoint inspector. Tabs survive screen navigation, and processes (e.g. `npm run dev`) can be run alongside in the process tab.
 
 The dashboard requires [Bun](https://bun.sh). When invoked under Node, the CLI re-launches itself under Bun automatically. If Bun isn't installed, the CLI falls back to headless mode and prints a hint.
@@ -157,6 +159,15 @@ chowbea-axios init --non-interactive \
 - `sidepanelsCodegen()` — same for `*.panel.tsx` files
 
 Scaffold them via `chowbea-axios init --with-vite-plugins` or `chowbea-axios plugins --setup`. See [docs](https://axios.chowbea.com) for the full registry pattern.
+
+## Compatibility
+
+| | |
+|---|---|
+| **Node** | `>=20` (declared in `engines`; tested in CI on 20 / 22 / 24 across Linux, macOS, Windows) |
+| **Module format** | **ESM only.** `package.json` declares `"type": "module"`. Importing from a CommonJS file with `require("chowbea-axios")` will fail with `ERR_REQUIRE_ESM`. CJS consumers should either use a dynamic `import()` or migrate the importing file to ESM. The `chowbea-axios` CLI binary is unaffected — it works regardless of your project's module format. |
+| **Vite** | Optional peer dep, `>=5.0.0`. Only required if you use the `chowbea-axios/vite` codegen plugins. |
+| **Bun** | Required to launch the interactive TUI (the headless CLI works under Node alone). |
 
 ---
 
