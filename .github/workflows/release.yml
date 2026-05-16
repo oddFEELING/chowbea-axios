@@ -50,9 +50,23 @@
 name: release
 
 on:
+  # Primary trigger: a user-pushed tag fires this workflow.
+  # (Tags created by another workflow's GITHUB_TOKEN do NOT trigger this —
+  # see release-please.yml, which now publishes inline instead of relying
+  # on this hand-off.)
   push:
     tags:
       - "v*"
+  # Manual trigger: re-publish a specific tag from the GitHub UI / gh CLI.
+  # Useful when a tag exists but the original publish failed or never fired
+  # (e.g., the v2.0.0 tag created by release-please before the inline
+  # publish refactor — see history).
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to publish (e.g. v2.0.0). Must already exist on origin."
+        required: true
+        type: string
 
 # Default-deny except where required.
 #   contents: read   — checkout
@@ -71,9 +85,19 @@ jobs:
     # npmjs is already scoped to this repo, but the extra guard avoids
     # spending CI minutes on doomed publishes from forks.)
     if: github.repository == 'oddFEELING/chowbea-axios'
+    env:
+      # Unified tag reference for both triggers:
+      #   - push:tags        → github.ref_name is the tag (e.g. "v2.0.0")
+      #   - workflow_dispatch → use the user-supplied input
+      RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
     steps:
-      - name: Checkout
+      - name: Checkout the tagged commit
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          # Ensure we publish from the exact commit the tag points at,
+          # not whatever HEAD happens to be on the branch the dispatch
+          # came from.
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -103,7 +127,7 @@ jobs:
         # previous version under a new tag.
         run: |
           PKG_VERSION=$(node -p "require('./package.json').version")
-          TAG_VERSION=${GITHUB_REF_NAME#v}
+          TAG_VERSION=${RELEASE_TAG#v}
           if [ "$PKG_VERSION" != "$TAG_VERSION" ]; then
             echo "Version mismatch: package.json=$PKG_VERSION tag=$TAG_VERSION"
             exit 1
