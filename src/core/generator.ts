@@ -1157,7 +1157,16 @@ async function generateTypes(
 	logger.info({ specPath, typesPath }, "Generating TypeScript types...");
 
 	try {
-		const ast = await openapiTS(new URL(`file://${specPath}`), hooks);
+		const ast = await openapiTS(new URL(`file://${specPath}`), {
+			// Emit $Read<T> / $Write<T> markers around readOnly / writeOnly
+			// schema properties. The helpers template wraps response types in
+			// `Readable<...>` and request types in `Writable<...>` so that
+			// writeOnly fields drop out of response shapes and readOnly fields
+			// drop out of request bodies — a correctness fix for any spec
+			// using these annotations.
+			readWriteMarkers: true,
+			...hooks,
+		});
 		await writeFile(typesPath, astToString(ast), "utf8");
 	} catch (err) {
 		const message = err instanceof Error ? err.message : String(err);
@@ -1339,8 +1348,10 @@ import type {
 	MediaType,
 	OperationRequestBodyContent,
 	PathsWithMethod,
+	Readable,
 	ResponseObjectMap,
 	SuccessResponse,
+	Writable,
 } from "openapi-typescript-helpers";
 import type { components, operations, paths } from "./_generated/api.types";
 
@@ -1420,10 +1431,14 @@ type ExpandRecursively<T> = T extends (...args: infer A) => infer R
  * inferred shape for JSON, multipart, octet-stream — every media type
  * the spec declares — courtesy of \`OperationRequestBodyContent\`.
  *
+ * Wrapped in \`Writable<...>\` so server-controlled \`readOnly\` properties
+ * (e.g. \`id\`, \`createdAt\`) are stripped from request body types — you
+ * can't supply them, the server fills them in.
+ *
  * @example type CreateUserInput = ApiRequestBody<"/api/users", "post">
  */
 export type ApiRequestBody<P extends Paths, M extends HttpMethod> = ExpandRecursively<
-	OperationRequestBodyContent<Operation<P, M>>
+	Writable<OperationRequestBodyContent<Operation<P, M>>>
 >;
 
 /**
@@ -1434,6 +1449,9 @@ export type ApiRequestBody<P extends Paths, M extends HttpMethod> = ExpandRecurs
  * (\`application/json\`, \`application/vnd.api+json\`, etc.). Pass a Media
  * value to narrow to e.g. \`"text/csv"\`, \`"application/octet-stream"\`, or
  * \`"text/event-stream"\` when the spec declares multiple response shapes.
+ *
+ * Wrapped in \`Readable<...>\` so \`writeOnly\` properties (e.g. \`password\`)
+ * are stripped from response types — the server doesn't return them.
  *
  * @example type UserResponse = ApiResponseData<"/api/users/{id}", "get">
  * @example type CreatedResponse = ApiResponseData<"/api/users", "post", 201>
@@ -1447,15 +1465,17 @@ export type ApiResponseData<
 		: ApiStatusCodes<P, M>,
 	Media extends MediaType = \`\${string}/json\`,
 > = ExpandRecursively<
-	FilterKeys<
-		Operation<P, M> extends { responses: infer R }
-			? R extends Record<string | number, unknown>
-				? R[Status & keyof R] extends { content: infer C }
-					? C
+	Readable<
+		FilterKeys<
+			Operation<P, M> extends { responses: infer R }
+				? R extends Record<string | number, unknown>
+					? R[Status & keyof R] extends { content: infer C }
+						? C
+						: never
 					: never
-				: never
-			: never,
-		Media
+				: never,
+			Media
+		>
 	>
 >;
 
@@ -1524,7 +1544,7 @@ type OperationPositiveStatus<OpId extends keyof operations> =
  * @see Use concrete types in _generated/api.contracts.ts for cmd+click navigation
  */
 export type ServerRequestBody<OpId extends keyof operations> = ExpandRecursively<
-	OperationRequestBodyContent<operations[OpId]>
+	Writable<OperationRequestBodyContent<operations[OpId]>>
 >;
 
 /**
@@ -1566,15 +1586,17 @@ export type ServerResponseType<
 	Status extends OperationStatusCodes<OpId> = OperationPositiveStatus<OpId>,
 	Media extends MediaType = \`\${string}/json\`,
 > = ExpandRecursively<
-	FilterKeys<
-		operations[OpId] extends { responses: infer R }
-			? R extends Record<string | number, unknown>
-				? R[Status & keyof R] extends { content: infer C }
-					? C
+	Readable<
+		FilterKeys<
+			operations[OpId] extends { responses: infer R }
+				? R extends Record<string | number, unknown>
+					? R[Status & keyof R] extends { content: infer C }
+						? C
+						: never
 					: never
-				: never
-			: never,
-		Media
+				: never,
+			Media
+		>
 	>
 >;
 
@@ -1584,7 +1606,7 @@ export type ServerResponseType<
  * \`SuccessResponse<ResponseObjectMap<operations[OpId]>>\`.
  */
 export type ServerSuccessResponse<OpId extends keyof operations> = ExpandRecursively<
-	SuccessResponse<ResponseObjectMap<operations[OpId]>>
+	Readable<SuccessResponse<ResponseObjectMap<operations[OpId]>>>
 >;
 
 /**

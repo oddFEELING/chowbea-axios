@@ -232,6 +232,72 @@ describe("ServerRequestBody / ServerRequestParams / ServerResponseType — opera
 	});
 });
 
+describe("readOnly / writeOnly marker handling (L1)", () => {
+	// The Account schema in the fixture wraps `id` and `createdAt` in
+	// `$Read<...>` (readOnly) and `password` in `$Write<...>` (writeOnly),
+	// matching what openapi-typescript emits when readWriteMarkers: true.
+
+	it("ApiResponseData strips writeOnly fields from response types", () => {
+		// Reading an account should NEVER include `password` — the server
+		// doesn't return it.
+		type Got = ApiResponseData<"/accounts/{id}", "get">;
+		expectTypeOf<Got>().toMatchTypeOf<{
+			id: string;
+			email: string;
+			name: string;
+			createdAt?: string;
+		}>();
+		// password must not appear in the response shape.
+		expectTypeOf<Got>().not.toMatchTypeOf<{ password: string }>();
+	});
+
+	it("ApiResponseData unwraps $Read markers (server-controlled fields stay)", () => {
+		type Got = ApiResponseData<"/accounts/{id}", "get">;
+		// `id` was $Read<string> on the wire, should appear as plain string here.
+		expectTypeOf<Got>().toMatchTypeOf<{ id: string }>();
+	});
+
+	it("ApiRequestBody strips readOnly fields from request body types", () => {
+		// Updating an account must NOT accept `id` or `createdAt` —
+		// those are server-set and would be rejected.
+		type Got = ApiRequestBody<"/accounts/{id}", "patch">;
+		expectTypeOf<Got>().toMatchTypeOf<{
+			email: string;
+			name: string;
+			password?: string;
+		}>();
+		// readOnly fields must not appear as required-or-supplied fields.
+		expectTypeOf<Got>().not.toMatchTypeOf<{ id: string }>();
+		expectTypeOf<Got>().not.toMatchTypeOf<{ createdAt: string }>();
+	});
+
+	it("ApiRequestBody unwraps $Write markers (writeable fields stay)", () => {
+		type Got = ApiRequestBody<"/accounts/{id}", "patch">;
+		// `password` was $Write<string> on the wire, should appear as plain string.
+		expectTypeOf<Got>().toMatchTypeOf<{ password?: string }>();
+	});
+
+	it("ServerRequestBody respects the same stripping by operation id", () => {
+		type Got = ServerRequestBody<"updateAccount">;
+		expectTypeOf<Got>().toMatchTypeOf<{
+			email: string;
+			name: string;
+			password?: string;
+		}>();
+		expectTypeOf<Got>().not.toMatchTypeOf<{ id: string }>();
+	});
+
+	it("ServerResponseType respects writeOnly stripping by operation id", () => {
+		type Got = ServerResponseType<"getAccount">;
+		expectTypeOf<Got>().toMatchTypeOf<{
+			id: string;
+			email: string;
+			name: string;
+		}>();
+		expectTypeOf<Got>().not.toMatchTypeOf<{ password: string }>();
+	});
+});
+
 describe("ServerModel — component schema resolution", () => {
 	it("resolves a named schema", () => {
 		expectTypeOf<ServerModel<"User">>().toEqualTypeOf<User>();
