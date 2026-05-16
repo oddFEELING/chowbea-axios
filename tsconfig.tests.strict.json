@@ -1,0 +1,26 @@
+{
+	// Stricter compile of just the GENERATED-OUTPUT fixtures (api.types,
+	// api.helpers), to catch the case where chowbea-axios emits TypeScript
+	// that lies under a strict consumer tsconfig. Consumers commonly enable
+	// noUncheckedIndexedAccess (openapi-fetch docs recommend it) and
+	// exactOptionalPropertyTypes.
+	//
+	// The test files (api-helpers.test-d.ts) intentionally use unsafe
+	// indexing for fixture access and are not included here.
+	//
+	// Known issues surfaced today (will fail once tightened):
+	//   - api.helpers.ts: `paths[P][M]` doesn't typecheck under strict
+	//     (already patched in the vendored fixture as VENDORED-PATCH).
+	//   - api.helpers.ts: `ServerRequestParams` resolves to `never` under
+	//     exactOptionalPropertyTypes because conditional type narrowing
+	//     no longer matches optional/required mixes.
+	//   - api.helpers.ts: `requestBody?: never` collapses to `unknown` —
+	//     see the documented BUG tests in api-helpers.test-d.ts.
+	"extends": "./tsconfig.tests.json",
+	"compilerOptions": {
+		"noUncheckedIndexedAccess": true,
+		"exactOptionalPropertyTypes": true
+	},
+	"include": ["tests/types/fixtures/**/*"],
+	"exclude": ["node_modules", "dist"]
+}

@@ -22,6 +22,7 @@ import {
 	saveCacheMetadata,
 } from "../fetcher.js";
 import { generate, generateClientFiles } from "../generator.js";
+import { loadHooks } from "../hooks-loader.js";
 import type { ClientFilesResult, DryRunResult } from "./types.js";
 
 /**
@@ -142,6 +143,9 @@ export async function executeGenerate(
 		logger,
 	});
 
+	// Load optional generator hooks from chowbea.config.{mjs,js}
+	const hooks = await loadHooks(projectRoot, logger);
+
 	// Run generation
 	logger.step("generate", "Generating types and operations...");
 	const result = await generate({
@@ -150,6 +154,7 @@ export async function executeGenerate(
 		dryRun: options.dryRun,
 		skipTypes: options.operationsOnly,
 		skipOperations: options.typesOnly,
+		hooks,
 	});
 
 	// Handle dry-run output
