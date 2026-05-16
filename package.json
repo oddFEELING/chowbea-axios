@@ -36,7 +36,7 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "@inquirer/prompts": "^7.0.0",
+    "@inquirer/prompts": "^8.4.3",
     "@opentui/core": "^0.2.1",
     "@opentui/react": "^0.2.1",
     "picocolors": "^1.1.1",
