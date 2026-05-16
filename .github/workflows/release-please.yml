@@ -1,4 +1,5 @@
-# release-please — automates versioning + CHANGELOG from conventional commits.
+# release-please — automates versioning + CHANGELOG from conventional commits,
+# AND publishes to npm in the same workflow run when a release is cut.
 #
 # How it works:
 #   1. On every push to `main`, this workflow runs `release-please`.
@@ -11,16 +12,21 @@
 #        - CHANGELOG.md entry generated from the commits
 #        - .release-please-manifest.json updated
 #   4. When you merge that PR, release-please creates a git tag and a
-#      GitHub Release. The tag fires .github/workflows/release.yml,
-#      which publishes to npm with provenance (via Trusted Publishing).
+#      GitHub Release inside this same workflow run. The subsequent
+#      `if: steps.release.outputs.release_created` steps below then build,
+#      test, and `npm publish --provenance` via Trusted Publishing — all
+#      inside this same job, all with the same OIDC token.
 #
-# First-time bootstrap:
-#   release-please-config.json currently has `"release-as": "2.0.0"` for
-#   this package — a one-time override that forces the first release-please
-#   PR to cut exactly 2.0.0 (graduating out of the alpha line) instead of
-#   computing a next version from commit semantics. Remove that field
-#   AFTER 2.0.0 ships; from then on, release-please picks the next
-#   version automatically.
+# Why publish inline (vs. handing off to release.yml on tag-push):
+#   Tags created by a workflow using GITHUB_TOKEN do NOT trigger other
+#   workflows — GitHub's anti-infinite-loop guard. The hand-off pattern
+#   (release-please creates tag → release.yml fires on push:tags) silently
+#   fails. Inline publish in the same workflow run sidesteps the problem
+#   entirely: no cross-workflow trigger, no PAT, no GitHub App needed.
+#
+#   release.yml stays in the repo for the manual tag-push case (the
+#   local `release:experimental` script for off-cycle prereleases — where
+#   the tag IS user-pushed and DOES trigger workflows correctly).
 #
 # Conventional commit cheat sheet:
 #   feat: <subject>           → minor bump   (1.2.3 → 1.3.0)
@@ -31,6 +37,7 @@
 # Permissions:
 #   contents: write        — create commits, tags, releases
 #   pull-requests: write   — open/update the release PR
+#   id-token: write        — OIDC token for npm Trusted Publishing
 name: release-please
 
 on:
@@ -40,17 +47,58 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  id-token: write
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     # Defense-in-depth: only run on the canonical repo.
     if: github.repository == 'oddFEELING/chowbea-axios'
     steps:
       - name: Run release-please
+        id: release
         uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           # Manifest-driven config — both files at repo root.
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # The remaining steps only run when release-please actually cut a
+      # release this run (i.e., the user just merged the release PR).
+      # Most pushes to main don't cut a release — they just update or
+      # open the in-flight release PR, and these steps are skipped.
+
+      - name: Checkout (release just cut)
+        if: ${{ steps.release.outputs.release_created }}
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Node.js
+        if: ${{ steps.release.outputs.release_created }}
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: "22"
+          cache: npm
+          # Required for Trusted Publishing — tells npm where to send
+          # the publish + OIDC handshake.
+          registry-url: "https://registry.npmjs.org"
+
+      - name: Install dependencies
+        if: ${{ steps.release.outputs.release_created }}
+        run: npm ci
+
+      - name: Build
+        if: ${{ steps.release.outputs.release_created }}
+        run: npm run build
+
+      - name: Test
+        if: ${{ steps.release.outputs.release_created }}
+        run: npm test
+
+      - name: Publish to npm (Trusted Publishing + provenance)
+        if: ${{ steps.release.outputs.release_created }}
+        # No NODE_AUTH_TOKEN: OIDC token from `id-token: write` is exchanged
+        # for a scoped npm credential at publish time.
+        # No --tag flag: npm picks the dist-tag from the version itself
+        # (stable → latest, prerelease → none).
+        run: npm publish --provenance
