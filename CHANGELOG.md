@@ -4,6 +4,27 @@ All notable changes to `chowbea-axios` will be documented in this file.
 
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from `2.0.0` onward. Entries are generated automatically by [release-please](https://github.com/googleapis/release-please) from [Conventional Commits](https://www.conventionalcommits.org/). See [SECURITY.md](SECURITY.md) for the supported-versions policy.
 
+## [2.0.0](https://github.com/oddFEELING/chowbea-axios/compare/v2.0.0-alpha.22...v2.0.0) (2026-05-16)
+
+
+### Added
+
+* **fetch:** Add Basic Auth support for Swagger spec endpoints ([#5](https://github.com/oddFEELING/chowbea-axios/issues/5)) ([fda0ad9](https://github.com/oddFEELING/chowbea-axios/commit/fda0ad9cc816e582ae8a8df381d2eec2b8be4541))
+* smart validation, ref-utils, vite plugins & Windows path compat ([#3](https://github.com/oddFEELING/chowbea-axios/issues/3)) ([7d763fe](https://github.com/oddFEELING/chowbea-axios/commit/7d763fe73edb803d0e88a3a26b9ef39d6c4184b0))
+* **tui:** Convert CLI to OpenTUI dashboard with endpoint inspector ([#2](https://github.com/oddFEELING/chowbea-axios/issues/2)) ([85221dd](https://github.com/oddFEELING/chowbea-axios/commit/85221dd1a8e4f02b72f333dac0e35a3dd10684e6))
+
+
+### Fixed
+
+* **cli:** visible progress by default, add watch mode heartbeats ([#10](https://github.com/oddFEELING/chowbea-axios/issues/10)) ([05b5f7e](https://github.com/oddFEELING/chowbea-axios/commit/05b5f7ec6acfac9aac8fa2e35c116b515ee25d81))
+* **config,fetcher:** validation hardening — SSRF, TOML escape, defaults, auto-create, env regex ([#56](https://github.com/oddFEELING/chowbea-axios/issues/56)) ([74e4f8d](https://github.com/oddFEELING/chowbea-axios/commit/74e4f8d81203d1b6abd8e8a2142d210c21904ccf))
+* **config:** support spec_file-only configs across validator, generate, watch, diff, init ([#9](https://github.com/oddFEELING/chowbea-axios/issues/9)) ([b721274](https://github.com/oddFEELING/chowbea-axios/commit/b721274df764c4fd0dba3e56a802da0776a0be79))
+* **diff,plugins,env-manager,init:** regex bug, deep diff, hex-color env values, non-interactive init ([#59](https://github.com/oddFEELING/chowbea-axios/issues/59)) ([a2094ef](https://github.com/oddFEELING/chowbea-axios/commit/a2094ef188cf7ed557831ca80cc53a00e7a10caa))
+* **generator:** operations reference named contracts, not paths lookup ([#6](https://github.com/oddFEELING/chowbea-axios/issues/6)) ([183e853](https://github.com/oddFEELING/chowbea-axios/commit/183e8530d5a84dd8718f7d1e50a6cb52eab950b6)), closes [#4](https://github.com/oddFEELING/chowbea-axios/issues/4)
+* **generator:** support */* media types and quote dotted property keys ([#12](https://github.com/oddFEELING/chowbea-axios/issues/12)) ([58a4468](https://github.com/oddFEELING/chowbea-axios/commit/58a4468ab8c212d53a44346ac4db88f4edaf06bd))
+* **runtime:** watch backoff, process-manager perf, instance drift, Windows path, router fallback ([#57](https://github.com/oddFEELING/chowbea-axios/issues/57)) ([e8213fc](https://github.com/oddFEELING/chowbea-axios/commit/e8213fcebcd8d57ea084a81686da4c3afaf31296))
+* **tooling:** bun.lock detection, lockfile policy, hardened CI template, audit cleanup ([#58](https://github.com/oddFEELING/chowbea-axios/issues/58)) ([414f61b](https://github.com/oddFEELING/chowbea-axios/commit/414f61b94e20ce38bb9f277c4922165d5386dce1))
+
 ## [Unreleased]
 
 _Nothing yet._
