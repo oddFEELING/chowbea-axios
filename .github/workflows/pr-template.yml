@@ -1,0 +1,60 @@
+# Enforces the PR description template at .github/pull_request_template.md.
+#
+# What this checks:
+#   - The PR body contains the required section headers `## Why`,
+#     `## What changed`, and `## Test plan`.
+#   - Optional sections (`## Breaking changes`, `## Sources / related`) are
+#     not enforced — the template tells authors to delete those when
+#     inapplicable.
+#
+# What's exempt:
+#   - PRs opened by bots (dependabot, release-please) — their bodies are
+#     auto-generated and the template doesn't apply.
+#
+# Fail-mode: this becomes a required check on PRs. To unblock a PR that
+# the bot misclassifies, paste the missing headers into the description
+# and the check re-runs on the next edit.
+
+name: pr-template
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  check:
+    name: required sections present
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    # Skip bot-authored PRs; their descriptions are auto-generated and the
+    # template intentionally doesn't cover them.
+    if: github.event.pull_request.user.type != 'Bot'
+    steps:
+      - name: Validate PR body has required sections
+        uses: actions/github-script@d746ffe35508b1917358783b479e04febd2b8f71 # v9.0.0
+        with:
+          script: |
+            const body = context.payload.pull_request.body || "";
+            const required = ["## Why", "## What changed", "## Test plan"];
+            const missing = required.filter((h) => !body.includes(h));
+
+            if (missing.length === 0) {
+              core.info("All required sections present.");
+              return;
+            }
+
+            const message = [
+              `PR description is missing ${missing.length} required section${missing.length === 1 ? "" : "s"}:`,
+              ...missing.map((h) => `  - ${h}`),
+              "",
+              "The PR template is at .github/pull_request_template.md.",
+              "Add the missing headers (you can leave the body blank under each",
+              "if there's truly nothing to say) and this check will pass on the",
+              "next edit.",
+            ].join("\n");
+
+            core.setFailed(message);
