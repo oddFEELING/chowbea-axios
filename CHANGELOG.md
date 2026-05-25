@@ -4,6 +4,13 @@ All notable changes to `chowbea-axios` will be documented in this file.
 
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from `2.0.0` onward. Entries are generated automatically by [release-please](https://github.com/googleapis/release-please) from [Conventional Commits](https://www.conventionalcommits.org/). See [SECURITY.md](SECURITY.md) for the supported-versions policy.
 
+## [2.1.1](https://github.com/oddFEELING/chowbea-axios/compare/v2.1.0...v2.1.1) (2026-05-25)
+
+
+### Fixed
+
+* **generator:** emit undefined in data slot for body-less POST/PUT ([#93](https://github.com/oddFEELING/chowbea-axios/issues/93)) ([e20c5c1](https://github.com/oddFEELING/chowbea-axios/commit/e20c5c13fae8cc37b4fb6d0f54aadfa9729f0588))
+
 ## [2.1.0](https://github.com/oddFEELING/chowbea-axios/compare/v2.0.0...v2.1.0) (2026-05-16)
 
 
