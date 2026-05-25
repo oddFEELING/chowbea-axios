@@ -4,6 +4,13 @@ All notable changes to `chowbea-axios` will be documented in this file.
 
 The format is based on [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/), and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) from `2.0.0` onward. Entries are generated automatically by [release-please](https://github.com/googleapis/release-please) from [Conventional Commits](https://www.conventionalcommits.org/). See [SECURITY.md](SECURITY.md) for the supported-versions policy.
 
+## [2.1.2](https://github.com/oddFEELING/chowbea-axios/compare/v2.1.1...v2.1.2) (2026-05-25)
+
+
+### Fixed
+
+* **generator:** de-duplicate when Schema Model name collides with operation type name ([#96](https://github.com/oddFEELING/chowbea-axios/issues/96)) ([234033a](https://github.com/oddFEELING/chowbea-axios/commit/234033acf365b52cde21c846e1a177d32c2aaca4))
+
 ## [2.1.1](https://github.com/oddFEELING/chowbea-axios/compare/v2.1.0...v2.1.1) (2026-05-25)
 
 
