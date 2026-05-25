@@ -137,6 +137,20 @@
         }
       }
     },
+    "/ping": {
+      "post": {
+        "operationId": "ping",
+        "summary": "operationId pascal-cases to a name that collides with a Schema Model (Ping + Body = PingBody, which is already a schema below)",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/PingBody" }
+            }
+          }
+        },
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
     "/upload": {
       "post": {
         "operationId": "upload-file",
@@ -202,6 +216,14 @@
         "properties": {
           "id": { "type": "integer" },
           "tags": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "PingBody": {
+        "type": "object",
+        "description": "Schema name collides with the `ping` operation's request body type name — generator must emit only one declaration.",
+        "required": ["message"],
+        "properties": {
+          "message": { "type": "string" }
         }
       }
     }
