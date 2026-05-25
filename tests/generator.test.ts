@@ -394,4 +394,32 @@ describe("generator: known-bug regression markers", () => {
 			await cleanup();
 		}
 	});
+
+	it("body-less POST/PUT operations emit `undefined` in the data slot", async () => {
+		// Regression: POST and PUT share PATCH's `(url, data, ...args)` runtime
+		// signature. When an op has no requestBody, the generator must still
+		// pass `undefined` as the data arg — otherwise pathParams gets sent as
+		// the JSON request body. The earlier code only special-cased PATCH.
+		const spec = await loadFixture("edge-cases.json");
+		const { operations, cleanup } = await runGenerator(spec);
+		try {
+			// Body-less POST with path params.
+			expect(operations).toMatch(
+				/"publish-item":[^=]*=>\s*apiClient\.post\("\/items\/\{id\}\/publish",\s*undefined,\s*pathParams,\s*config\)/,
+			);
+			// Body-less PUT with path params.
+			expect(operations).toMatch(
+				/"archive-item":[^=]*=>\s*apiClient\.put\("\/items\/\{id\}\/archive",\s*undefined,\s*pathParams,\s*config\)/,
+			);
+			// Negative assertion: pathParams must NOT be passed in the data slot.
+			expect(operations).not.toMatch(
+				/apiClient\.post\("\/items\/\{id\}\/publish",\s*pathParams/,
+			);
+			expect(operations).not.toMatch(
+				/apiClient\.put\("\/items\/\{id\}\/archive",\s*pathParams/,
+			);
+		} finally {
+			await cleanup();
+		}
+	});
 });
