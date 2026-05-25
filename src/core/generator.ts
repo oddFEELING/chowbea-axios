@@ -997,6 +997,14 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
  */
 `);
 
+	// Tracks every top-level identifier already declared in the file so the
+	// later operation-body / response / params passes can skip names that
+	// would collide with a Schema Model (TS2300). Example: a spec with
+	// `components.schemas.AiChatBody` AND an `aiChat` operation whose
+	// body pascal-cases to `AiChatBody` would otherwise emit two
+	// declarations of the same name.
+	const declaredNames = new Set<string>();
+
 	// ~ ======= Schema Models ======= ~
 	const schemaEntries = Object.entries(metadata.schemas);
 	if (schemaEntries.length > 0) {
@@ -1007,6 +1015,7 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 
 		for (const [name, schema] of schemaEntries) {
 			const typeName = sanitizeIdentifier(name);
+			declaredNames.add(typeName);
 			const schemaObj = schema as Record<string, unknown>;
 			const desc = schemaObj.description
 				? ` * ${escapeJsdoc(schemaObj.description as string)}\n `
@@ -1055,6 +1064,12 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 			for (const resp of op.allResponses) {
 				if (!resp.hasJsonContent) continue;
 				const statusTypeName = `${baseName}Response${resp.status}`;
+				if (declaredNames.has(statusTypeName)) {
+					lines.push(`// Response: ${op.method.toUpperCase()} ${escapeJsdoc(op.path)} (${resp.status}) — name already declared as a Schema Model above; skipped.`);
+					lines.push(``);
+					statusTypes.push(statusTypeName);
+					continue;
+				}
 				const desc = resp.description ? ` - ${escapeJsdoc(resp.description)}` : "";
 				const schema = resolveOperationSchema(metadata.spec, op.operationId, "response", resp.status);
 				lines.push(`/** Response: ${op.method.toUpperCase()} ${escapeJsdoc(op.path)} (${resp.status}${desc}) */`);
@@ -1063,6 +1078,7 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 				} else {
 					lines.push(`export type ${statusTypeName} = unknown;`);
 				}
+				declaredNames.add(statusTypeName);
 				lines.push(``);
 				statusTypes.push(statusTypeName);
 			}
@@ -1070,9 +1086,16 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 			// Emit statusless alias pointing to the primary success response
 			if (op.responseStatus !== null) {
 				const successTypeName = `${baseName}Response${op.responseStatus}`;
-				lines.push(`/** Response: ${op.method.toUpperCase()} ${escapeJsdoc(op.path)} (happy path) */`);
-				lines.push(`export type ${baseName}Response = ${successTypeName};`);
-				lines.push(``);
+				const aliasName = `${baseName}Response`;
+				if (declaredNames.has(aliasName)) {
+					lines.push(`// Response: ${op.method.toUpperCase()} ${escapeJsdoc(op.path)} (happy path) — name already declared above; skipped.`);
+					lines.push(``);
+				} else {
+					lines.push(`/** Response: ${op.method.toUpperCase()} ${escapeJsdoc(op.path)} (happy path) */`);
+					lines.push(`export type ${aliasName} = ${successTypeName};`);
+					declaredNames.add(aliasName);
+					lines.push(``);
+				}
 			}
 		}
 	}
@@ -1087,6 +1110,11 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 
 		for (const op of bodyOps) {
 			const typeName = `${toPascalCase(sanitizeIdentifier(op.operationId))}Body`;
+			if (declaredNames.has(typeName)) {
+				lines.push(`// Request body: ${op.method.toUpperCase()} ${escapeJsdoc(op.path)} — name already declared as a Schema Model above; skipped.`);
+				lines.push(``);
+				continue;
+			}
 			const contentType = op.hasJsonBody ? "application/json" : "multipart/form-data";
 			const schema = resolveOperationSchema(metadata.spec, op.operationId, "requestBody", undefined, contentType);
 			lines.push(`/** Request body: ${op.method.toUpperCase()} ${escapeJsdoc(op.path)} */`);
@@ -1095,6 +1123,7 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 			} else {
 				lines.push(`export type ${typeName} = unknown;`);
 			}
+			declaredNames.add(typeName);
 			lines.push(``);
 		}
 	}
@@ -1109,6 +1138,11 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 
 		for (const op of pathParamOps) {
 			const typeName = `${toPascalCase(sanitizeIdentifier(op.operationId))}PathParams`;
+			if (declaredNames.has(typeName)) {
+				lines.push(`// Path params: ${op.method.toUpperCase()} ${escapeJsdoc(op.path)} — name already declared above; skipped.`);
+				lines.push(``);
+				continue;
+			}
 			const schema = resolveOperationSchema(metadata.spec, op.operationId, "pathParams");
 			lines.push(`/** Path params: ${op.method.toUpperCase()} ${escapeJsdoc(op.path)} */`);
 			if (schema) {
@@ -1116,6 +1150,7 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 			} else {
 				lines.push(`export type ${typeName} = Record<string, string>;`);
 			}
+			declaredNames.add(typeName);
 			lines.push(``);
 		}
 	}
@@ -1130,6 +1165,11 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 
 		for (const op of queryParamOps) {
 			const typeName = `${toPascalCase(sanitizeIdentifier(op.operationId))}QueryParams`;
+			if (declaredNames.has(typeName)) {
+				lines.push(`// Query params: ${op.method.toUpperCase()} ${escapeJsdoc(op.path)} — name already declared above; skipped.`);
+				lines.push(``);
+				continue;
+			}
 			const schema = resolveOperationSchema(metadata.spec, op.operationId, "queryParams");
 			lines.push(`/** Query params: ${op.method.toUpperCase()} ${escapeJsdoc(op.path)} */`);
 			if (schema) {
@@ -1137,6 +1177,7 @@ function generateContractsFileContent(metadata: ContractMetadata): string {
 			} else {
 				lines.push(`export type ${typeName} = Record<string, unknown>;`);
 			}
+			declaredNames.add(typeName);
 			lines.push(``);
 		}
 	}

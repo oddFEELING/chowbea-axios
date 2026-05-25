@@ -395,6 +395,28 @@ describe("generator: known-bug regression markers", () => {
 		}
 	});
 
+	it("Schema Model name colliding with operation body name emits only one declaration", async () => {
+		// Regression: when `components.schemas.X` exists AND an operationId
+		// pascal-cases to `XBody` (e.g. schema `PingBody` + operation `ping`
+		// whose body type would also be named `PingBody`), the generator
+		// previously emitted two top-level declarations of the same name,
+		// which is a TS2300 hard error at compile time. The fix is to track
+		// already-declared names and skip duplicates in the later passes.
+		const spec = await loadFixture("edge-cases.json");
+		const { contracts, cleanup } = await runGenerator(spec);
+		try {
+			const matches = contracts.match(/^export (?:interface|type) PingBody\b/gm) ?? [];
+			expect(matches).toHaveLength(1);
+			// The skipped duplicate leaves an explanatory comment so the
+			// reader can find the canonical declaration.
+			expect(contracts).toMatch(
+				/Request body: POST \/ping — name already declared as a Schema Model above; skipped\./,
+			);
+		} finally {
+			await cleanup();
+		}
+	});
+
 	it("body-less POST/PUT operations emit `undefined` in the data slot", async () => {
 		// Regression: POST and PUT share PATCH's `(url, data, ...args)` runtime
 		// signature. When an op has no requestBody, the generator must still
