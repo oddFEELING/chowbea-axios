@@ -38,6 +38,12 @@
 #   contents: write        — create commits, tags, releases
 #   pull-requests: write   — open/update the release PR
 #   id-token: write        — OIDC token for npm Trusted Publishing
+#
+# npm Trusted Publisher setup (one-time, on npmjs.com — NO GitHub secret):
+#   On https://www.npmjs.com/package/chowbea-axios/access → Trusted Publisher,
+#   add an entry with Workflow filename: `release-please.yml` (this file —
+#   not `release.yml`, which only handles the off-cycle tag-push fallback).
+#   See .github/workflows/release.yml for the full walkthrough.
 name: release-please
 
 on:
