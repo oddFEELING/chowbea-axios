@@ -96,6 +96,47 @@
         }
       }
     },
+    "/items/{id}/publish": {
+      "post": {
+        "operationId": "publish-item",
+        "summary": "Body-less POST with path param — must emit undefined in the data slot",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Published",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/Item" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/items/{id}/archive": {
+      "put": {
+        "operationId": "archive-item",
+        "summary": "Body-less PUT with path param — must emit undefined in the data slot",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "integer" }
+          }
+        ],
+        "responses": {
+          "204": { "description": "Archived" }
+        }
+      }
+    },
     "/upload": {
       "post": {
         "operationId": "upload-file",

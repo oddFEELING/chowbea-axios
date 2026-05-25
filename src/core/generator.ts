@@ -188,9 +188,12 @@ function generateOperationFunction(operation: OperationMetadata): string {
 			apiCall = `apiClient.${httpMethod}(${pathLiteral}, data, config)`;
 		}
 	} else {
-		// GET/DELETE without body
-		// PATCH without body still needs undefined as data parameter
-		if (httpMethod === "patch") {
+		// POST/PUT/PATCH share a `(url, data, ...args)` runtime signature, so a
+		// body-less operation on any of them still needs `undefined` in the
+		// data slot — otherwise pathParams gets sent as the request body.
+		const needsDataSlot =
+			httpMethod === "post" || httpMethod === "put" || httpMethod === "patch";
+		if (needsDataSlot) {
 			if (pathParams.length > 0) {
 				apiCall = `apiClient.${httpMethod}(${pathLiteral}, undefined, pathParams, config)`;
 			} else {
