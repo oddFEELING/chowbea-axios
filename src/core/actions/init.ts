@@ -25,6 +25,7 @@ import {
   loadConfig,
 } from "../config.js";
 import { generateClientFiles } from "../generator.js";
+import { ensureGitignoreEntry } from "./env-manager.js";
 import {
   generateDefineSurfaceContent,
   generateSurfaceRegistryContent,
@@ -959,24 +960,15 @@ async function ensureGitignoreEntries(
   projectRoot: string,
   logger: Logger,
 ): Promise<void> {
-  const gitignorePath = path.join(projectRoot, ".gitignore");
   const entry = "_internal/";
-  const header =
-    "# chowbea-axios cache (timestamps, downloaded specs)";
-
-  let content = "";
-  try {
-    content = await readFile(gitignorePath, "utf8");
-  } catch {
-    // No .gitignore yet — we'll create one
+  const added = await ensureGitignoreEntry(
+    projectRoot,
+    entry,
+    "# chowbea-axios cache (timestamps, downloaded specs)",
+  );
+  if (added) {
+    logger.step("gitignore", `Added ${entry} to .gitignore`);
   }
-
-  const lines = content.split("\n").map((l) => l.trim());
-  if (lines.includes(entry)) return;
-
-  const block = `\n${header}\n${entry}\n`;
-  await writeFile(gitignorePath, content + block, "utf8");
-  logger.step("gitignore", `Added ${entry} to .gitignore`);
 }
 
 /**

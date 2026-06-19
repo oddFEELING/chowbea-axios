@@ -21,6 +21,10 @@ import { executeStatus } from "../core/actions/status.js";
 import { executeDiff } from "../core/actions/diff.js";
 import { executeValidate } from "../core/actions/validate.js";
 import { executeWatch } from "../core/actions/watch.js";
+import { executeResolve } from "../core/actions/resolve.js";
+import type { ResolveActionOptions } from "../core/actions/resolve.js";
+import { executeDoctor } from "../core/actions/doctor.js";
+import type { DoctorActionOptions } from "../core/actions/doctor.js";
 import {
 	executeInit,
 	setupVitePlugins,
@@ -39,6 +43,8 @@ const COMMANDS = [
 	"diff",
 	"validate",
 	"watch",
+	"resolve",
+	"doctor",
 	"init",
 	"plugins",
 ] as const;
@@ -61,6 +67,8 @@ function printHelp(): void {
     diff         Compare current vs new spec and show changes
     validate     Validate the OpenAPI spec
     watch        Watch for spec changes and auto-regenerate
+    resolve      Resolve a merge conflict by regenerating generated files
+    doctor       Check (and --fix) generated cache files wrongly tracked in git
     init         Initialize chowbea-axios in your project
     plugins      Manage Vite codegen plugins (Surfaces & Side Panels)
 
@@ -157,6 +165,23 @@ function printCommandHelp(command: CommandName): void {
         --timeout <ms>       Request timeout in milliseconds
     -q, --quiet              Suppress non-error output
     -v, --verbose            Show detailed output
+`,
+		resolve: `
+  ${"\x1b[1m"}chowbea-axios resolve${"\x1b[0m"} - Resolve merge conflicts in generated files by regenerating
+
+  ${"\x1b[1m"}FLAGS${"\x1b[0m"}
+    -c, --config <path>    Path to api.config.toml
+    -q, --quiet            Suppress non-error output
+    -v, --verbose          Show detailed output
+`,
+		doctor: `
+  ${"\x1b[1m"}chowbea-axios doctor${"\x1b[0m"} - Check for (and --fix) cache files wrongly tracked in git
+
+  ${"\x1b[1m"}FLAGS${"\x1b[0m"}
+    -c, --config <path>    Path to api.config.toml
+        --fix              Untrack cache artifacts and add the gitignore rule
+    -q, --quiet            Suppress non-error output
+    -v, --verbose          Show detailed output
 `,
 		plugins: `
   ${"\x1b[1m"}chowbea-axios plugins${"\x1b[0m"} - Manage Vite codegen plugins (Surfaces & Side Panels)
@@ -284,6 +309,76 @@ async function handleGenerate(args: string[]): Promise<void> {
 
 	try {
 		await executeGenerate(options, logger);
+	} catch (error) {
+		logger.error(formatError(error));
+		process.exitCode = 1;
+	}
+}
+
+async function handleResolve(args: string[]): Promise<void> {
+	const { values } = parseArgs({
+		args,
+		options: {
+			config: { type: "string", short: "c" },
+			quiet: { type: "boolean", short: "q", default: false },
+			verbose: { type: "boolean", short: "v", default: false },
+		},
+		strict: true,
+	});
+
+	const level = getLogLevel({
+		quiet: values.quiet,
+		verbose: values.verbose,
+	});
+	const logger = createLogger({ level });
+
+	const options: ResolveActionOptions = {
+		configPath: values.config,
+	};
+
+	try {
+		const result = await executeResolve(options, logger);
+		// Non-generated conflicts still need manual resolution — fail so the
+		// developer (and CI) knows the merge isn't fully done.
+		if (result.conflictedOther.length > 0) {
+			process.exitCode = 1;
+		}
+	} catch (error) {
+		logger.error(formatError(error));
+		process.exitCode = 1;
+	}
+}
+
+async function handleDoctor(args: string[]): Promise<void> {
+	const { values } = parseArgs({
+		args,
+		options: {
+			config: { type: "string", short: "c" },
+			fix: { type: "boolean", default: false },
+			quiet: { type: "boolean", short: "q", default: false },
+			verbose: { type: "boolean", short: "v", default: false },
+		},
+		strict: true,
+	});
+
+	const level = getLogLevel({
+		quiet: values.quiet,
+		verbose: values.verbose,
+	});
+	const logger = createLogger({ level });
+
+	const options: DoctorActionOptions = {
+		configPath: values.config,
+		fix: values.fix ?? false,
+	};
+
+	try {
+		const result = await executeDoctor(options, logger);
+		// Report-only mode that found problems exits non-zero so `doctor` can
+		// gate CI; once `--fix` repairs them, it succeeds.
+		if (!result.healthy && !result.fixApplied) {
+			process.exitCode = 1;
+		}
 	} catch (error) {
 		logger.error(formatError(error));
 		process.exitCode = 1;
@@ -710,6 +805,12 @@ export async function runHeadless(
 			break;
 		case "watch":
 			await handleWatch(commandArgs);
+			break;
+		case "resolve":
+			await handleResolve(commandArgs);
+			break;
+		case "doctor":
+			await handleDoctor(commandArgs);
 			break;
 		case "init":
 			await handleInit(commandArgs);
