@@ -72,7 +72,10 @@ export async function executeDoctor(
 		};
 	}
 
-	const internalRel = path.relative(projectRoot, paths.internal);
+	const internalRel = path
+		.relative(projectRoot, paths.internal)
+		.split(path.sep)
+		.join("/");
 	const trackedArtifacts = listTrackedFiles(projectRoot, internalRel);
 	const hasIgnoreRule = await isGitignored(projectRoot, INTERNAL_IGNORE_ENTRY);
 

@@ -3,13 +3,12 @@
  *
  * Shared by the `doctor` (untrack stray artifacts) and `resolve`
  * (regenerate-on-conflict) actions. Uses `spawnSync` without `shell: true`
- * (deprecated in Node 24, DEP0190) and routes the binary name through
- * `resolveCommand` for Windows `.cmd` shim compatibility (Issue #16).
+ * (deprecated in Node 24, DEP0190). `git` is invoked by bare name: unlike the
+ * package-manager shims, it ships as `git.exe` on Windows (resolved via PATH),
+ * so it must NOT be rewritten to `git.cmd` the way `resolveCommand` does.
  */
 
 import { spawnSync } from "node:child_process";
-
-import { resolveCommand } from "./pm.js";
 
 /** A git invocation that exited non-zero. */
 export class GitError extends Error {
@@ -23,7 +22,7 @@ function runGit(
 	cwd: string,
 	args: string[],
 ): { status: number; stdout: string; stderr: string } {
-	const result = spawnSync(resolveCommand("git"), args, {
+	const result = spawnSync("git", args, {
 		cwd,
 		encoding: "utf8",
 	});
