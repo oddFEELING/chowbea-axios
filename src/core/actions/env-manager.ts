@@ -460,3 +460,37 @@ export async function isGitignored(
 
 	return false;
 }
+
+/**
+ * Append a single entry to the project's `.gitignore` if it isn't already
+ * present (creating the file when missing). Returns `true` when the entry
+ * was added, `false` when it was already there. Optionally prefixes the
+ * entry with a comment line for readability.
+ *
+ * Shared by `init` (ignore the cache on setup) and `doctor` (repair a repo
+ * that committed it). Idempotent.
+ */
+export async function ensureGitignoreEntry(
+	projectRoot: string,
+	entry: string,
+	comment?: string,
+): Promise<boolean> {
+	const gitignorePath = path.join(projectRoot, ".gitignore");
+
+	let content = "";
+	try {
+		content = await readFile(gitignorePath, "utf8");
+	} catch {
+		// No .gitignore yet — we'll create one.
+	}
+
+	const present = content
+		.split("\n")
+		.map((line) => line.trim())
+		.includes(entry);
+	if (present) return false;
+
+	const block = `${comment ? `\n${comment}\n` : "\n"}${entry}\n`;
+	await writeFile(gitignorePath, content + block, "utf8");
+	return true;
+}

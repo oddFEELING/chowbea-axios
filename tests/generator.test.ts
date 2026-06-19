@@ -32,6 +32,16 @@ describe("generator: end-to-end snapshots", () => {
 			await cleanup();
 		}
 	});
+
+	it("operations header omits the volatile 'Total operations' stat (merge-conflict noise)", async () => {
+		const spec = await loadFixture("petstore.json");
+		const { operations, cleanup } = await runGenerator(spec);
+		try {
+			expect(operations).not.toContain("Total operations");
+		} finally {
+			await cleanup();
+		}
+	});
 });
 
 describe("generator: client files (api.helpers.ts, api.instance.ts, api.error.ts, api.client.ts)", () => {
