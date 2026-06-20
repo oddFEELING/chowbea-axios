@@ -37,6 +37,16 @@ export function formatStatusOutput(result: StatusResult): string {
 	lines.push(`  ${pc.bold("chowbea-axios status")}`);
 	lines.push("");
 
+	// Which install is running — project-local vs global.
+	const runLabel =
+		result.executionSource === "project"
+			? pc.green("project install")
+			: pc.dim("global install");
+	lines.push(
+		`  ${pc.cyan("●")} ${pc.bold(pc.cyan(pad("running")))}${runLabel}`,
+	);
+	lines.push("");
+
 	// Config section
 	lines.push(
 		`  ${pc.cyan("\u25cf")} ${pc.bold(pc.cyan(pad("config")))}${result.configPath}${result.wasCreated ? pc.yellow(" (created)") : ""}`,

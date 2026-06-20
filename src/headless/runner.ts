@@ -18,6 +18,11 @@ import type { FetchActionOptions } from "../core/actions/fetch.js";
 import { executeGenerate } from "../core/actions/generate.js";
 import type { GenerateActionOptions } from "../core/actions/generate.js";
 import { executeStatus } from "../core/actions/status.js";
+import {
+	executionSource,
+	findRunningPackageRoot,
+	resolveLocalInstall,
+} from "../core/local-resolution.js";
 import { executeDiff } from "../core/actions/diff.js";
 import { executeValidate } from "../core/actions/validate.js";
 import { executeWatch } from "../core/actions/watch.js";
@@ -758,7 +763,9 @@ export async function runHeadless(
 	args: string[],
 ): Promise<void> {
 	// Strip the command name and global-only flags from args for sub-parsers
-	const commandArgs = args.filter((a) => a !== command && a !== "--headless");
+	const commandArgs = args.filter(
+		(a) => a !== command && a !== "--headless" && a !== "--global",
+	);
 
 	// --version
 	if (args.includes("--version")) {
@@ -769,7 +776,11 @@ export async function runHeadless(
 			const thisDir = dirname(fileURLToPath(import.meta.url));
 			const pkgPath = resolve(thisDir, "..", "..", "package.json");
 			const pkg = JSON.parse(readFileSync(pkgPath, "utf8")) as { version: string };
-			console.log(`chowbea-axios v${pkg.version}`);
+			const source = executionSource({
+				runningRoot: findRunningPackageRoot(import.meta.url),
+				localRoot: resolveLocalInstall(process.cwd())?.root ?? null,
+			});
+			console.log(`chowbea-axios v${pkg.version} (${source})`);
 		} catch {
 			console.log("chowbea-axios (unknown version)");
 		}

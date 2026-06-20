@@ -13,6 +13,12 @@ import { formatError } from "../errors.js";
 import { hasLocalSpec, loadCacheMetadata, loadLocalSpec } from "../fetcher.js";
 import type { CacheMetadata } from "../fetcher.js";
 import { HTTP_METHODS } from "../http-methods.js";
+import {
+	executionSource,
+	findRunningPackageRoot,
+	resolveLocalInstall,
+} from "../local-resolution.js";
+import type { ExecutionSource } from "../local-resolution.js";
 
 /**
  * Options for the status action.
@@ -59,6 +65,8 @@ export interface StatusResult {
 	methodCounts: MethodCounts | null;
 	fileStatus: FileStatus;
 	projectRoot: string;
+	/** Whether the running CLI is the project-local install or a global one. */
+	executionSource: ExecutionSource;
 }
 
 /**
@@ -176,6 +184,12 @@ export async function executeStatus(
 			: null;
 		const fileStatus = await checkGeneratedFiles(outputPaths);
 
+		// Which install is actually running — project-local or global.
+		const runtimeSource = executionSource({
+			runningRoot: findRunningPackageRoot(import.meta.url),
+			localRoot: resolveLocalInstall(process.cwd())?.root ?? null,
+		});
+
 		// Resolve displayed source: prefer local spec_file when set, else api_endpoint.
 		const isLocalSpec = Boolean(config.spec_file);
 		const endpoint = isLocalSpec
@@ -193,6 +207,7 @@ export async function executeStatus(
 			methodCounts,
 			fileStatus,
 			projectRoot,
+			executionSource: runtimeSource,
 		};
 	} catch (error) {
 		logger.error(formatError(error));
