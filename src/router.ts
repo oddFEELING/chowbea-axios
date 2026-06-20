@@ -2,6 +2,11 @@ import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { resolve, dirname } from "node:path";
 import { commandExists, resolveCommand } from "./core/pm.js";
+import {
+	decideDelegation,
+	findRunningPackageRoot,
+	resolveLocalInstall,
+} from "./core/local-resolution.js";
 
 /**
  * Check if Bun is available on the system.
@@ -43,9 +48,49 @@ function relaunchWithBun(argv: string[]): boolean {
 }
 
 /**
+ * Local-first execution. If the working directory has its own chowbea-axios
+ * install and we are NOT it (i.e. the global one is running), hand off to the
+ * project-local bin so the pinned version runs. Mirrors relaunchWithBun: on
+ * delegation the child runs to completion and we exit with its status; if the
+ * spawn itself fails we warn and continue with the current process.
+ */
+function maybeDelegateToLocal(argv: string[]): void {
+	const decision = decideDelegation({
+		runningRoot: findRunningPackageRoot(import.meta.url),
+		localInstall: resolveLocalInstall(process.cwd()),
+		argv,
+		env: process.env,
+	});
+	if (decision.action !== "delegate") return;
+
+	// No `shell: true` — user argv flows through unescaped. The sentinel env var
+	// stops the delegated child from delegating back. Issue #16.
+	const result = spawnSync(
+		process.execPath,
+		[decision.binPath, ...argv.slice(2)],
+		{
+			stdio: "inherit",
+			env: { ...process.env, CHOWBEA_LOCAL_DELEGATED: "1" },
+		},
+	);
+
+	if (result.error) {
+		console.error(
+			`chowbea-axios: could not run the project-local install ` +
+				`(${result.error.message}); continuing with the global one.`,
+		);
+		return;
+	}
+	process.exit(result.status ?? 0);
+}
+
+/**
  * Command router -- dispatches to TUI dashboard or headless CLI.
  */
 export async function route(argv: string[]): Promise<void> {
+	// Local-first: hand off to a project-local install before anything else.
+	maybeDelegateToLocal(argv);
+
 	const args = argv.slice(2); // strip runtime and script path
 	const command = args.find((a) => !a.startsWith("-"));
 	const hasFlag =

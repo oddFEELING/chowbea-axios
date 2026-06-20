@@ -121,6 +121,7 @@ export function HomeScreen() {
 				<box flexDirection="row">
 					<text fg={colors.fgDim}>{`  ${TAGLINE}  `}</text>
 					<text fg={colors.accent}>{`v${version}`}</text>
+					<text fg={result.executionSource === "project" ? colors.success : colors.fgDim}>{`  ·  ${result.executionSource}`}</text>
 				</box>
 			</box>
 
