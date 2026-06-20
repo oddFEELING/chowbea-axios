@@ -163,4 +163,50 @@ describe("resolveLocalInstall", () => {
 			rmSync(cwd, { recursive: true, force: true });
 		}
 	});
+
+	it("walks up parent directories to find a hoisted install", () => {
+		const root = mkdtempSync(join(tmpdir(), "chowbea-rli-nested-"));
+		try {
+			const pkgRoot = join(root, "node_modules", "chowbea-axios");
+			mkdirSync(join(pkgRoot, "bin"), { recursive: true });
+			writeFileSync(
+				join(pkgRoot, "package.json"),
+				JSON.stringify({
+					name: "chowbea-axios",
+					version: "9.9.9",
+					bin: { "chowbea-axios": "bin/chowbea-axios.js" },
+				}),
+			);
+			writeFileSync(join(pkgRoot, "bin", "chowbea-axios.js"), "");
+			const nested = join(root, "packages", "app", "src");
+			mkdirSync(nested, { recursive: true });
+
+			expect(resolveLocalInstall(nested)?.root).toBe(realpathSync(pkgRoot));
+		} finally {
+			rmSync(root, { recursive: true, force: true });
+		}
+	});
+
+	it("resolves a string-form bin field", () => {
+		const cwd = mkdtempSync(join(tmpdir(), "chowbea-rli-str-"));
+		try {
+			const pkgRoot = join(cwd, "node_modules", "chowbea-axios");
+			mkdirSync(join(pkgRoot, "bin"), { recursive: true });
+			writeFileSync(
+				join(pkgRoot, "package.json"),
+				JSON.stringify({
+					name: "chowbea-axios",
+					version: "9.9.9",
+					bin: "bin/chowbea-axios.js",
+				}),
+			);
+			writeFileSync(join(pkgRoot, "bin", "chowbea-axios.js"), "");
+
+			expect(resolveLocalInstall(cwd)?.binPath).toBe(
+				join(realpathSync(pkgRoot), "bin", "chowbea-axios.js"),
+			);
+		} finally {
+			rmSync(cwd, { recursive: true, force: true });
+		}
+	});
 });

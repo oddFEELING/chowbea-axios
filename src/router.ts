@@ -81,7 +81,16 @@ function maybeDelegateToLocal(argv: string[]): void {
 		);
 		return;
 	}
-	process.exit(result.status ?? 0);
+	if (typeof result.status === "number") {
+		process.exit(result.status);
+	}
+	if (result.signal) {
+		// The child was killed by a signal — re-raise it so we terminate the
+		// same way instead of masking it as a clean (exit 0) success.
+		process.kill(process.pid, result.signal);
+		return;
+	}
+	process.exit(1);
 }
 
 /**
